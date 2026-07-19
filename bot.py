@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response, abort
+from flask import Flask, request, jsonify, make_response
 import random
 import json
 from datetime import datetime
@@ -56,9 +56,7 @@ def generate_market_data(query: str, count: int = 10):
     return results
 
 def is_bot_or_scanner():
-    """Определяет, является ли запрос от бота/сканера или от человека."""
     user_agent = request.headers.get('User-Agent', '').lower()
-    # Список User-Agent'ов, которые используют сканеры и боты
     bot_keywords = ['bot', 'scanner', 'crawler', 'spider', 'curl', 'wget', 'python-requests', 'go-http-client']
     for keyword in bot_keywords:
         if keyword in user_agent:
@@ -66,7 +64,6 @@ def is_bot_or_scanner():
     return False
 
 def add_x402_headers_to_response(response):
-    """Добавляет x402-заголовки в ответ."""
     response.headers['X-Payment-Required'] = 'true'
     response.headers['X-Payment-Amount'] = '0.001'
     response.headers['X-Payment-Asset'] = 'USDC'
@@ -75,6 +72,71 @@ def add_x402_headers_to_response(response):
     response.headers['X-Payment-Description'] = 'Real-time market prices and trends'
     response.headers['X-Data-Count'] = '10 items per request'
     return response
+
+# ====================================================
+# ОТКРЫТАЯ OPENAPI-СПЕЦИФИКАЦИЯ (ДЛЯ X402SCAN)
+# ====================================================
+
+@app.route('/openapi.json', methods=['GET'])
+def openapi_spec():
+    spec = {
+        "openapi": "3.0.0",
+        "info": {
+            "title": "Price Bot API",
+            "version": "1.0.0",
+            "description": "Market data API with x402 payments. Price: 0.001 USDC per request."
+        },
+        "paths": {
+            "/api/data": {
+                "get": {
+                    "summary": "Get market data by query",
+                    "parameters": [
+                        {
+                            "name": "q",
+                            "in": "query",
+                            "required": True,
+                            "schema": {"type": "string"},
+                            "description": "Search query (e.g., bitcoin, iphone)"
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Successful response with data",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "status": {"type": "string"},
+                                            "query": {"type": "string"},
+                                            "count": {"type": "integer"},
+                                            "data": {"type": "array"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "402": {
+                            "description": "Payment Required — send USDC to the specified address"
+                        }
+                    }
+                }
+            }
+        },
+        "components": {
+            "securitySchemes": {
+                "x402": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "X-Payment-Required",
+                    "description": "Set to 'true' to confirm payment"
+                }
+            }
+        },
+        "security": [{"x402": []}]
+    }
+    response = make_response(jsonify(spec), 200)
+    return add_x402_headers_to_response(response)
 
 # ====================================================
 # ЭНДПОИНТЫ
@@ -87,6 +149,7 @@ def root():
         "message": "Market Data Bot is live",
         "endpoints": {
             "/api/data": "Основной эндпоинт. Используй ?q=запрос",
+            "/openapi.json": "OpenAPI спецификация для сканеров",
             "examples": get_available_queries()
         }
     }
@@ -116,7 +179,7 @@ def get_data():
         response = make_response(jsonify(data), 200)
         return add_x402_headers_to_response(response)
     
-    # Если запрос от бота/сканера с параметром q — возвращаем 402 (требуем оплату)
+    # Если запрос от бота/сканера с параметром q — возвращаем 402
     if is_bot_or_scanner():
         response = make_response(jsonify({
             "error": "Payment Required",
