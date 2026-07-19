@@ -1,116 +1,116 @@
-from flask import Flask, request, jsonify
+ from flask import Flask, request, jsonify
 import aiohttp
 import asyncio
 import json
-import re
-from bs4 import BeautifulSoup
+from datetime import datetime
 
 app = Flask(__name__)
 
 # ====================================================
-# РЕАЛЬНЫЙ ПАРСИНГ AVITO (С РЕАЛЬНЫМИ ЦЕНАМИ)
+# РЕАЛЬНЫЕ ДАННЫЕ: КУРСЫ КРИПТОВАЛЮТ (CoinGecko API)
 # ====================================================
 
 async def fetch_data(query: str):
     """
-    Парсит реальные объявления с Avito по запросу.
-    Возвращает реальные цены, названия и ссылки.
+    Возвращает реальные курсы криптовалют по запросу.
+    CoinGecko — бесплатный, стабильный, не блокирует.
     """
-    # Avito поиск — мобильная версия (легче парсить)
-    url = f"https://m.avito.ru/rossiya?q={query}"
+    # Маппинг популярных запросов на ID монет
+    coin_map = {
+        "bitcoin": "bitcoin",
+        "btc": "bitcoin",
+        "ethereum": "ethereum",
+        "eth": "ethereum",
+        "solana": "solana",
+        "sol": "solana",
+        "ton": "the-open-network",
+        "toncoin": "the-open-network",
+        "dogecoin": "dogecoin",
+        "doge": "dogecoin",
+        "ripple": "ripple",
+        "xrp": "ripple",
+        "cardano": "cardano",
+        "ada": "cardano"
+    }
+    
+    # Определяем ID монеты
+    coin_id = coin_map.get(query.lower(), "bitcoin")
+    
+    # API CoinGecko (бесплатный, 10-50 запросов в минуту)
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 11; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ru-RU,ru;q=0.9"
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
     }
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, headers=headers, timeout=20) as resp:
+            async with session.get(url, headers=headers, timeout=15) as resp:
                 if resp.status == 200:
-                    html = await resp.text()
-                    soup = BeautifulSoup(html, 'html.parser')
+                    data = await resp.json()
                     
-                    # Ищем карточки товаров (селекторы для мобильной версии)
-                    items = soup.find_all('div', class_='item') or soup.find_all('article')
+                    # Извлекаем нужные данные
+                    name = data.get("name", "Неизвестно")
+                    symbol = data.get("symbol", "").upper()
+                    price_usd = data.get("market_data", {}).get("current_price", {}).get("usd", 0.0)
+                    price_btc = data.get("market_data", {}).get("current_price", {}).get("btc", 0.0)
+                    market_cap = data.get("market_data", {}).get("market_cap", {}).get("usd", 0)
+                    volume_24h = data.get("market_data", {}).get("total_volume", {}).get("usd", 0)
+                    price_change_24h = data.get("market_data", {}).get("price_change_percentage_24h", 0.0)
                     
-                    if not items:
-                        # Пробуем другой селектор
-                        items = soup.find_all('div', {'data-marker': 'item'})
-                    
-                    results = []
-                    for item in items[:20]:
-                        try:
-                            # Название
-                            title_elem = item.find('h3') or item.find('a', class_='title')
-                            title = title_elem.text.strip() if title_elem else "Неизвестно"
-                            
-                            # Цена — ищем числа с валютой
-                            price_elem = item.find('span', class_='price') or item.find('div', class_='price')
-                            price_text = price_elem.text.strip() if price_elem else ""
-                            price_match = re.search(r'([\d\s]+)', price_text)
-                            price = float(price_match.group(1).replace(' ', '')) if price_match else 0.0
-                            
-                            # Ссылка
-                            link_elem = item.find('a')
-                            link = link_elem.get('href') if link_elem else ""
-                            
-                            results.append({
-                                "title": title[:100],
-                                "price": price,
-                                "in_stock": True,
-                                "source": "avito.ru",
-                                "url": f"https://m.avito.ru{link}" if link else ""
-                            })
-                        except Exception:
-                            # Пропускаем битые карточки
-                            continue
-                    
-                    # Если есть результаты — возвращаем их
-                    if results:
-                        return results
-                    else:
-                        # Если парсинг не дал результатов — пробуем fallback
-                        return get_fallback_data(query)
+                    # Формируем результат
+                    results = [{
+                        "title": f"{name} ({symbol})",
+                        "price_usd": round(price_usd, 2),
+                        "price_btc": round(price_btc, 8),
+                        "market_cap_usd": market_cap,
+                        "volume_24h_usd": volume_24h,
+                        "price_change_24h_percent": round(price_change_24h, 2),
+                        "in_stock": True,
+                        "source": "coingecko.com",
+                        "timestamp": datetime.now().isoformat()
+                    }]
+                    return results
                 else:
-                    # Если Avito не ответил — возвращаем fallback
-                    return get_fallback_data(query)
+                    return get_fallback_data(query, f"API error: {resp.status}")
                     
         except Exception as e:
-            # Любая ошибка — fallback
-            return get_fallback_data(query)
+            return get_fallback_data(query, str(e))
 
 # ====================================================
-# FALLBACK (ЕСЛИ РЕАЛЬНЫЙ ПАРСИНГ НЕ РАБОТАЕТ)
+# FALLBACK (ЕСЛИ API НЕ ДОСТУПНО)
 # ====================================================
 
-def get_fallback_data(query: str):
-    """Фейковые данные, чтобы бот не падал (но на них не заработаешь)"""
+def get_fallback_data(query: str, error: str = ""):
+    """Возвращает тестовые данные, если реальный API не работает"""
     return [
         {
-            "title": f"{query} — пример {i+1}",
-            "price": round(999.99 + i * 150.50, 2),
-            "in_stock": i % 2 == 0,
+            "title": f"{query} (пример)",
+            "price_usd": 999.99,
+            "price_btc": 0.015,
+            "market_cap_usd": 1000000000,
+            "volume_24h_usd": 50000000,
+            "price_change_24h_percent": 2.5,
+            "in_stock": True,
             "source": "demo",
-            "url": f"https://example.com/{query}/{i}"
+            "timestamp": datetime.now().isoformat()
         }
-        for i in range(10)
     ]
 
 # ====================================================
-# API
+# API — ТОЧКА ВХОДА
 # ====================================================
 
 @app.route('/', methods=['GET', 'HEAD'])
 def root():
-    return jsonify({"status": "ok", "message": "Bot is alive"})
+    return jsonify({"status": "ok", "message": "Crypto Price Bot is alive"})
 
 @app.route('/api/data', methods=['GET'])
 def get_data():
     query = request.args.get('q', '')
     if not query:
-        return jsonify({"error": "Укажи q"}), 400
+        return jsonify({"error": "Укажите запрос, например: ?q=bitcoin"}), 400
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -124,7 +124,7 @@ def get_data():
     })
 
 # ====================================================
-# X402 ЗАГОЛОВКИ
+# X402 ЗАГОЛОВКИ ДЛЯ ПЛАТЕЖЕЙ
 # ====================================================
 
 @app.after_request
@@ -134,7 +134,7 @@ def add_x402_headers(response):
     response.headers['X-Payment-Asset'] = 'USDC'
     response.headers['X-Payment-Network'] = 'base'
     response.headers['X-Payment-PayTo'] = '0x3f10530c86e6a1d26edbf27b6b6e660c77d79915'
-    response.headers['X-Payment-Description'] = 'Real prices and product data'
+    response.headers['X-Payment-Description'] = 'Live cryptocurrency prices from CoinGecko'
     return response
 
 # ====================================================
