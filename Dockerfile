@@ -17,5 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py .
 COPY tollbooth.config.json .
 
+# Устанавливаем agent402-tollbooth глобально
+RUN npm install -g agent402-tollbooth@0.4.3
+
 # Запускаем бота и прослойку в одном контейнере
-CMD python bot.py & npx agent402-tollbooth --target http://localhost:5000 --config tollbooth.config.json
+CMD python bot.py & agent402-tollbooth --target http://localhost:5000 --config tollbooth.config.json
