@@ -17,11 +17,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
-# Кеш на 2 минуты
 cache = TTLCache(maxsize=200, ttl=120)
 
-# База данных для статистики
+# ====================================================
+# БАЗА ДАННЫХ
+# ====================================================
+
 def init_db():
     try:
         conn = sqlite3.connect('bot_stats.db')
@@ -69,7 +70,7 @@ def get_payment_headers():
         "X-Payment-Currency": PAYMENT_CONFIG["currency"],
         "X-Payment-Network": PAYMENT_CONFIG["network"],
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
-        "X-Payment-Description": "Real-time cryptocurrency prices from Binance"
+        "X-Payment-Description": "Real-time cryptocurrency prices"
     }
 
 # ====================================================
@@ -85,74 +86,85 @@ BINANCE_SYMBOLS = {
     "ripple": "XRPUSDT", "xrp": "XRPUSDT"
 }
 
-def generate_fallback(query: str):
-    """Фолбэк-данные, если API недоступен"""
-    base_prices = {
-        "bitcoin": 65000, "btc": 65000,
-        "ethereum": 3500, "eth": 3500,
-        "solana": 150, "sol": 150,
-        "dogecoin": 0.15, "doge": 0.15,
-        "cardano": 0.45, "ada": 0.45,
-        "ripple": 0.62, "xrp": 0.62
-    }
-    base_price = base_prices.get(query.lower(), random.uniform(10, 1000))
-    return [{
-        "id": 1,
-        "name": query.title(),
-        "price_usd": round(base_price, 2),
-        "change_24h_percent": round(random.uniform(-5.0, 5.0), 2),
-        "source": "cache",
-        "timestamp": datetime.now().isoformat(),
-        "is_real": False
-    }]
+# Резервные цены (если API не работает)
+FALLBACK_PRICES = {
+    "bitcoin": 64750.23,
+    "ethereum": 3452.18,
+    "solana": 148.75,
+    "dogecoin": 0.1245,
+    "cardano": 0.432,
+    "ripple": 0.618
+}
+
+def is_valid_price(price):
+    """Проверяет, что цена валидна (не 0, не None)"""
+    return price is not None and price > 0
 
 # ====================================================
 # ПОЛУЧЕНИЕ РЕАЛЬНЫХ ЦЕН
 # ====================================================
 
-def fetch_real_price_sync(query: str):
-    """Получает реальную цену через ALLOrigins + Binance"""
+def fetch_price_from_binance(query: str):
+    """Пытается получить цену через ALLOrigins + Binance"""
     symbol = BINANCE_SYMBOLS.get(query.lower())
     if not symbol:
-        return generate_fallback(query)
+        return None
 
-    # Используем ALLOrigins как бесплатный прокси
     proxy_url = "https://api.allorigins.win/raw?url="
     binance_url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
     
-    for attempt in range(3):
-        try:
-            resp = requests.get(proxy_url + binance_url, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                price = float(data.get('lastPrice', 0))
-                change = float(data.get('priceChangePercent', 0))
-                high = float(data.get('highPrice', 0))
-                low = float(data.get('lowPrice', 0))
-                volume = float(data.get('quoteVolume', 0))
-
-                return [{
-                    "id": 1,
+    try:
+        resp = requests.get(proxy_url + binance_url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            price = float(data.get('lastPrice', 0))
+            change = float(data.get('priceChangePercent', 0))
+            
+            if is_valid_price(price):
+                return {
                     "name": query.title(),
                     "price_usd": round(price, 2),
                     "change_24h_percent": round(change, 2),
-                    "high_24h": round(high, 2),
-                    "low_24h": round(low, 2),
-                    "volume_24h": round(volume, 2),
                     "source": "binance.com (real-time)",
-                    "timestamp": datetime.now().isoformat(),
                     "is_real": True
-                }]
-            else:
-                logger.warning(f"ALLOrigins вернул {resp.status_code}, попытка {attempt+1}")
-                time.sleep(0.5)
-        except Exception as e:
-            logger.warning(f"Ошибка {attempt+1}: {e}")
-            time.sleep(0.5)
+                }
+    except Exception as e:
+        logger.error(f"Ошибка Binance: {e}")
     
-    # Если все попытки провалились — возвращаем fallback
-    logger.warning(f"Используем fallback для {query}")
-    return generate_fallback(query)
+    return None
+
+def fetch_real_price_sync(query: str):
+    """Получает цену с резервным вариантом"""
+    # Пытаемся получить с Binance
+    result = fetch_price_from_binance(query)
+    
+    if result and is_valid_price(result.get("price_usd", 0)):
+        return [result]
+    
+    # Если Binance не дал цену — используем резервную
+    fallback_price = FALLBACK_PRICES.get(query.lower())
+    if fallback_price:
+        logger.info(f"Используем резервную цену для {query}: {fallback_price}")
+        return [{
+            "id": 1,
+            "name": query.title(),
+            "price_usd": round(fallback_price, 2),
+            "change_24h_percent": round(random.uniform(-2.0, 2.0), 2),
+            "source": "fallback (cached)",
+            "timestamp": datetime.now().isoformat(),
+            "is_real": False
+        }]
+    
+    # Если ничего не работает — возвращаем заглушку
+    return [{
+        "id": 1,
+        "name": query.title(),
+        "price_usd": round(random.uniform(10, 1000), 2),
+        "change_24h_percent": round(random.uniform(-5.0, 5.0), 2),
+        "source": "generated",
+        "timestamp": datetime.now().isoformat(),
+        "is_real": False
+    }]
 
 # ====================================================
 # ОСНОВНОЙ ЭНДПОИНТ
@@ -177,7 +189,7 @@ def get_data():
         response_data = cache[cache_key]
         source = "cache"
     else:
-        logger.info(f"Запрос к Binance для {query}")
+        logger.info(f"Запрос для {query}")
         result = fetch_real_price_sync(query)
         response_data = {
             "status": "ok",
@@ -189,7 +201,7 @@ def get_data():
         # Кешируем только если данные реальные
         if result and result[0].get("is_real", False):
             cache[cache_key] = response_data
-            source = "binance"
+            source = "api"
         else:
             source = "fallback"
 
@@ -213,14 +225,14 @@ def openapi_spec():
         "info": {
             "title": "Price Bot API",
             "version": "2.0.0",
-            "description": "Real-time cryptocurrency prices via Binance. Payment: 0.001 USDC on Base.",
+            "description": "Cryptocurrency prices. Payment: 0.001 USDC on Base.",
             "x402": PAYMENT_CONFIG
         },
         "servers": [{"url": "https://price-bot-6erv.onrender.com"}],
         "paths": {
             "/api/data": {
                 "get": {
-                    "summary": "Get real-time price",
+                    "summary": "Get price data",
                     "parameters": [
                         {
                             "name": "q",
@@ -252,7 +264,7 @@ def root():
     return jsonify({
         "status": "ok",
         "service": "Price Bot v2.0",
-        "description": "Real cryptocurrency prices via Binance",
+        "description": "Cryptocurrency price API",
         "payment": PAYMENT_CONFIG,
         "supported": list(BINANCE_SYMBOLS.keys()),
         "endpoints": {
