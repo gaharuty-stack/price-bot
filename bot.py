@@ -41,5 +41,18 @@ def get_data():
     result = loop.run_until_complete(fetch_data(query))
     return jsonify({"status": "ok", "query": query, "count": len(result), "result": result})
 
+# ============================================================
+# ДОБАВЛЯЕМ ЗАГОЛОВКИ ДЛЯ X402 (ЧТОБЫ БОТЫ МОГЛИ ПЛАТИТЬ)
+# ============================================================
+@app.after_request
+def add_x402_headers(response):
+    response.headers['X-Payment-Required'] = 'true'
+    response.headers['X-Payment-Amount'] = '0.002'
+    response.headers['X-Payment-Asset'] = 'USDC'
+    response.headers['X-Payment-Network'] = 'base'
+    # ЗАМЕНИ АДРЕС НА СВОЙ (скопируй из tollbooth.config.json)
+    response.headers['X-Payment-PayTo'] = '0x3f1...9915'
+    return response
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
