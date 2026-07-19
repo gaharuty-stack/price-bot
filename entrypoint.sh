@@ -1,14 +1,16 @@
 #!/bin/bash
 set -e
 
-# Запускаем бота в фоне
+# Бот слушает на порту 5000
 python bot.py &
 
-# Ждём 3 секунды, чтобы бот успел стартовать
 sleep 3
 
-# Запускаем прослойку в фоновом режиме
-agent402-tollbooth --target http://localhost:5000 --config tollbooth.config.json
+# Tollbooth проксирует с порта 10000 (внешний) на 5000 (внутренний)
+agent402-tollbooth \
+  --target http://localhost:5000 \
+  --config tollbooth.config.json \
+  --port 10000 \
+  --host 0.0.0.0
 
-# Держим процесс активным
 wait
