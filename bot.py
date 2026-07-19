@@ -1,13 +1,11 @@
 from flask import Flask, request, jsonify, make_response
 import random
-import json
 import time
 from datetime import datetime
 import logging
 import requests
 from cachetools import TTLCache
 import sqlite3
-import os
 import re
 
 logging.basicConfig(
@@ -32,9 +30,8 @@ def init_db():
                       paid BOOLEAN DEFAULT FALSE)''')
         conn.commit()
         conn.close()
-        logger.info("База данных инициализирована")
     except Exception as e:
-        logger.error(f"Ошибка инициализации БД: {e}")
+        logger.error(f"Ошибка БД: {e}")
 
 init_db()
 
@@ -46,8 +43,8 @@ def log_request(query: str, ip: str, status: int, paid: bool = False):
                   (query, datetime.now().isoformat(), ip, status, paid))
         conn.commit()
         conn.close()
-    except Exception as e:
-        logger.error(f"Ошибка записи в БД: {e}")
+    except Exception:
+        pass
 
 app = Flask(__name__)
 
@@ -66,10 +63,6 @@ def get_payment_headers():
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
         "X-Payment-Description": "Real-time market price data from Binance"
     }
-
-# ====================================================
-# СООТВЕТСТВИЕ МОНЕТ ИХ ТИКЕРАМ НА BINANCE
-# ====================================================
 
 BINANCE_SYMBOLS = {
     "bitcoin": "BTCUSDT", "btc": "BTCUSDT",
@@ -106,62 +99,50 @@ def generate_market_data(query: str, count: int = 5):
         })
     return results
 
-# ====================================================
-# BINANCE API (СИНХРОННЫЙ, БЕЗ API-КЛЮЧА)
-# ====================================================
-
 def fetch_real_prices_sync(query: str):
     symbol = BINANCE_SYMBOLS.get(query.lower())
     if not symbol:
         return generate_market_data(query, count=5)
 
-    headers = {"User-Agent": "PriceBot/2.0 (Blackbox Research)"}
-    mirrors = [
-        "https://api.binance.com/api/v3/ticker/24hr",
-        "https://api1.binance.com/api/v3/ticker/24hr",
-        "https://api2.binance.com/api/v3/ticker/24hr",
-        "https://api3.binance.com/api/v3/ticker/24hr"
-    ]
-    
-    for attempt in range(3):
-        for mirror in mirrors:
-            try:
-                url = f"{mirror}?symbol={symbol}"
-                resp = requests.get(url, headers=headers, timeout=10)
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    price = float(data.get('lastPrice', 0))
-                    change = float(data.get('priceChangePercent', 0))
-                    high = float(data.get('highPrice', 0))
-                    low = float(data.get('lowPrice', 0))
-                    volume = float(data.get('quoteVolume', 0))
+    # Прямой IP Binance (получен через ping)
+    base_url = "https://13.32.91.204/api/v3/ticker/24hr"
+    headers = {
+        "User-Agent": "PriceBot/2.0 (Blackbox Research)",
+        "Host": "api.binance.com"
+    }
 
-                    return [{
-                        "id": 1,
-                        "name": f"{query.title()} ({symbol.replace('USDT', '')})",
-                        "price_usd": round(price, 2),
-                        "change_24h_percent": round(change, 2),
-                        "high_24h": round(high, 2),
-                        "low_24h": round(low, 2),
-                        "volume_24h": round(volume, 2),
-                        "source": "binance.com",
-                        "timestamp": datetime.now().isoformat(),
-                        "is_real": True
-                    }]
-                elif resp.status_code == 429:
-                    time.sleep(1 * (attempt + 1))
-                    continue
-            except Exception as e:
-                logger.warning(f"Попытка {attempt+1} на {mirror} не удалась: {e}")
-                time.sleep(0.5)
-                continue
+    for attempt in range(3):
+        try:
+            url = f"{base_url}?symbol={symbol}"
+            resp = requests.get(url, headers=headers, timeout=10, verify=True)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                price = float(data.get('lastPrice', 0))
+                change = float(data.get('priceChangePercent', 0))
+                high = float(data.get('highPrice', 0))
+                low = float(data.get('lowPrice', 0))
+                volume = float(data.get('quoteVolume', 0))
+
+                return [{
+                    "id": 1,
+                    "name": f"{query.title()} ({symbol.replace('USDT', '')})",
+                    "price_usd": round(price, 2),
+                    "change_24h_percent": round(change, 2),
+                    "high_24h": round(high, 2),
+                    "low_24h": round(low, 2),
+                    "volume_24h": round(volume, 2),
+                    "source": "binance.com",
+                    "timestamp": datetime.now().isoformat(),
+                    "is_real": True
+                }]
+            else:
+                time.sleep(1)
+        except Exception as e:
+            logger.warning(f"Попытка {attempt+1} не удалась: {e}")
+            time.sleep(0.5)
     
     return generate_market_data(query, count=5)
-
-# ====================================================
-# ОСНОВНОЙ ЭНДПОИНТ
-# ====================================================
 
 @app.route('/api/data', methods=['GET'])
 def get_data():
@@ -169,16 +150,10 @@ def get_data():
     client_ip = request.remote_addr
 
     if not query:
-        return jsonify({
-            "error": "Missing parameter",
-            "message": "Укажите ?q=bitcoin или ?q=ethereum"
-        }), 400
+        return jsonify({"error": "Missing parameter", "message": "Укажите ?q=bitcoin"}), 400
 
     if not re.match(r'^[a-zA-Z0-9\-\_\s]+$', query):
-        return jsonify({
-            "error": "Invalid query",
-            "message": "Только буквы, цифры, дефис и подчёркивание"
-        }), 400
+        return jsonify({"error": "Invalid query"}), 400
 
     cache_key = query.lower()
 
@@ -197,25 +172,12 @@ def get_data():
         }
         cache[cache_key] = response_data
 
-    payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
-    paid = bool(payment_tx and len(payment_tx) > 10)
-
-    log_request(query, client_ip, 200, paid=paid)
-
     response = make_response(jsonify(response_data), 200)
-
     for k, v in get_payment_headers().items():
         response.headers[k] = v
 
-    if paid:
-        response.headers['X-Payment-Verified'] = 'true'
-        response.headers['X-Payment-Tx-Hash'] = payment_tx
-
+    log_request(query, client_ip, 200)
     return response
-
-# ====================================================
-# OPENAPI СПЕЦИФИКАЦИЯ
-# ====================================================
 
 @app.route('/openapi.json', methods=['GET'])
 def openapi_spec():
@@ -225,12 +187,7 @@ def openapi_spec():
             "title": "Price Bot API",
             "version": "2.0.0",
             "description": "Real-time cryptocurrency prices via Binance. Payment: 0.001 USDC on Base.",
-            "x402": {
-                "price": PAYMENT_CONFIG["amount"],
-                "currency": PAYMENT_CONFIG["currency"],
-                "network": PAYMENT_CONFIG["network"],
-                "receiver": PAYMENT_CONFIG["receiver"]
-            }
+            "x402": PAYMENT_CONFIG
         },
         "servers": [{"url": "https://price-bot-6erv.onrender.com"}],
         "paths": {
@@ -242,15 +199,14 @@ def openapi_spec():
                             "name": "q",
                             "in": "query",
                             "required": True,
-                            "schema": {"type": "string", "example": "bitcoin"},
-                            "description": "ID монеты: bitcoin, ethereum, solana, dogecoin, cardano, ripple"
+                            "schema": {"type": "string"},
+                            "description": "bitcoin, ethereum, solana, dogecoin, cardano, ripple"
                         }
                     ],
                     "responses": {
-                        "200": {"description": "Price data returned"},
-                        "402": {"description": "Payment required — check X-Payment-* headers"}
-                    },
-                    "x402": {"payment": PAYMENT_CONFIG}
+                        "200": {"description": "Price data"},
+                        "402": {"description": "Payment Required"}
+                    }
                 }
             }
         }
@@ -266,22 +222,17 @@ def well_known_x402():
 
 @app.route('/', methods=['GET'])
 def root():
-    info = {
+    return jsonify({
         "status": "ok",
         "service": "Price Bot v2.0",
         "description": "Real cryptocurrency prices via Binance",
         "payment": PAYMENT_CONFIG,
         "endpoints": {
-            "/api/data": "GET with ?q=bitcoin (payment required)",
-            "/openapi.json": "OpenAPI specification",
-            "/.well-known/x402": "x402 discovery endpoint"
-        },
-        "documentation": "https://price-bot-6erv.onrender.com/openapi.json"
-    }
-    response = make_response(jsonify(info), 200)
-    for k, v in get_payment_headers().items():
-        response.headers[k] = v
-    return response
+            "/api/data": "GET with ?q=bitcoin",
+            "/openapi.json": "OpenAPI spec",
+            "/.well-known/x402": "x402 discovery"
+        }
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)
