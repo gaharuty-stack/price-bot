@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, abort
 import random
 import json
 from datetime import datetime
@@ -6,7 +6,7 @@ from datetime import datetime
 app = Flask(__name__)
 
 # ====================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ФУНКЦИИ
 # ====================================================
 
 def get_available_queries():
@@ -55,8 +55,18 @@ def generate_market_data(query: str, count: int = 10):
         })
     return results
 
+def is_bot_or_scanner():
+    """Определяет, является ли запрос от бота/сканера или от человека."""
+    user_agent = request.headers.get('User-Agent', '').lower()
+    # Список User-Agent'ов, которые используют сканеры и боты
+    bot_keywords = ['bot', 'scanner', 'crawler', 'spider', 'curl', 'wget', 'python-requests', 'go-http-client']
+    for keyword in bot_keywords:
+        if keyword in user_agent:
+            return True
+    return False
+
 def add_x402_headers_to_response(response):
-    """Вручную добавляет x402-заголовки в ответ"""
+    """Добавляет x402-заголовки в ответ."""
     response.headers['X-Payment-Required'] = 'true'
     response.headers['X-Payment-Amount'] = '0.001'
     response.headers['X-Payment-Asset'] = 'USDC'
@@ -87,7 +97,15 @@ def root():
 def get_data():
     query = request.args.get('q', '')
     
-    # Если параметра нет — возвращаем информацию для сканеров
+    # Если запрос от бота/сканера и нет параметра q — возвращаем 402
+    if is_bot_or_scanner() and not query:
+        response = make_response(jsonify({
+            "error": "Payment Required",
+            "message": "This API requires payment. Use ?q=bitcoin to get data."
+        }), 402)
+        return add_x402_headers_to_response(response)
+    
+    # Если параметра нет — возвращаем информацию для людей
     if not query:
         data = {
             "status": "info",
@@ -98,7 +116,18 @@ def get_data():
         response = make_response(jsonify(data), 200)
         return add_x402_headers_to_response(response)
     
-    # Основная логика
+    # Если запрос от бота/сканера с параметром q — возвращаем 402 (требуем оплату)
+    if is_bot_or_scanner():
+        response = make_response(jsonify({
+            "error": "Payment Required",
+            "message": "This API requires payment to access data.",
+            "price": "0.001 USDC",
+            "pay_to": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915",
+            "network": "base"
+        }), 402)
+        return add_x402_headers_to_response(response)
+    
+    # Основная логика для людей (возвращаем данные с 200 OK)
     result = generate_market_data(query, count=10)
     data = {
         "status": "ok",
