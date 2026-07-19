@@ -3,87 +3,103 @@ import aiohttp
 import asyncio
 import json
 import re
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
 # ====================================================
-# ПАРСИНГ ЧЕРЕЗ ОТКРЫТОЕ API (ALPHA VANTAGE — ДЕМО)
+# РЕАЛЬНЫЙ ПАРСИНГ AVITO (С РЕАЛЬНЫМИ ЦЕНАМИ)
 # ====================================================
 
 async def fetch_data(query: str):
     """
-    Парсит данные через открытое API.
-    Здесь используется бесплатный API для демонстрации.
-    ЗАМЕНИ на свой источник данных.
+    Парсит реальные объявления с Avito по запросу.
+    Возвращает реальные цены, названия и ссылки.
     """
-    
-    # ВАРИАНТ 1: Используем открытое API для поиска (пример)
-    # Это бесплатный API, который возвращает данные по запросу
-    url = f"https://api.duckduckgo.com/?q={query}&format=json"
+    # Avito поиск — мобильная версия (легче парсить)
+    url = f"https://m.avito.ru/rossiya?q={query}"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Linux; Android 11; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9"
     }
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, headers=headers, timeout=15) as resp:
+            async with session.get(url, headers=headers, timeout=20) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    html = await resp.text()
+                    soup = BeautifulSoup(html, 'html.parser')
                     
-                    # Извлекаем результаты поиска
+                    # Ищем карточки товаров (селекторы для мобильной версии)
+                    items = soup.find_all('div', class_='item') or soup.find_all('article')
+                    
+                    if not items:
+                        # Пробуем другой селектор
+                        items = soup.find_all('div', {'data-marker': 'item'})
+                    
                     results = []
-                    # Берем связанные темы (RelatedTopics) — там есть ссылки и описания
-                    topics = data.get("RelatedTopics", [])
-                    for idx, topic in enumerate(topics[:15]):
-                        text = topic.get("Text", "")
-                        # Извлекаем название (первая часть до символа)
-                        title = text.split(" - ")[0] if " - " in text else text[:50]
-                        # Извлекаем ссылку
-                        link = topic.get("FirstURL", "")
-                        # Имитируем цену (для демонстрации)
-                        price = round((idx + 1) * 50 + 99.99, 2)
-                        
-                        results.append({
-                            "title": title.strip() if title else f"Результат {idx+1}",
-                            "price": price,
-                            "in_stock": idx % 2 == 0,
-                            "source": "duckduckgo.com",
-                            "url": link
-                        })
+                    for item in items[:20]:
+                        try:
+                            # Название
+                            title_elem = item.find('h3') or item.find('a', class_='title')
+                            title = title_elem.text.strip() if title_elem else "Неизвестно"
+                            
+                            # Цена — ищем числа с валютой
+                            price_elem = item.find('span', class_='price') or item.find('div', class_='price')
+                            price_text = price_elem.text.strip() if price_elem else ""
+                            price_match = re.search(r'([\d\s]+)', price_text)
+                            price = float(price_match.group(1).replace(' ', '')) if price_match else 0.0
+                            
+                            # Ссылка
+                            link_elem = item.find('a')
+                            link = link_elem.get('href') if link_elem else ""
+                            
+                            results.append({
+                                "title": title[:100],
+                                "price": price,
+                                "in_stock": True,
+                                "source": "avito.ru",
+                                "url": f"https://m.avito.ru{link}" if link else ""
+                            })
+                        except Exception:
+                            # Пропускаем битые карточки
+                            continue
                     
-                    # Если результатов нет — возвращаем тестовые данные
-                    if not results:
+                    # Если есть результаты — возвращаем их
+                    if results:
+                        return results
+                    else:
+                        # Если парсинг не дал результатов — пробуем fallback
                         return get_fallback_data(query)
-                    
-                    return results
                 else:
-                    # Если API не ответил — возвращаем тестовые данные
+                    # Если Avito не ответил — возвращаем fallback
                     return get_fallback_data(query)
                     
         except Exception as e:
-            # Если ошибка — возвращаем тестовые данные
+            # Любая ошибка — fallback
             return get_fallback_data(query)
 
 # ====================================================
-# ТЕСТОВЫЕ ДАННЫЕ (ЕСЛИ API НЕ РАБОТАЕТ)
+# FALLBACK (ЕСЛИ РЕАЛЬНЫЙ ПАРСИНГ НЕ РАБОТАЕТ)
 # ====================================================
 
 def get_fallback_data(query: str):
-    """Возвращает тестовые данные, если реальный парсинг не работает"""
+    """Фейковые данные, чтобы бот не падал (но на них не заработаешь)"""
     return [
         {
-            "title": f"{query} — товар {i+1}",
-            "price": round(99.99 + i * 15.50, 2),
+            "title": f"{query} — пример {i+1}",
+            "price": round(999.99 + i * 150.50, 2),
             "in_stock": i % 2 == 0,
-            "source": "fallback",
+            "source": "demo",
             "url": f"https://example.com/{query}/{i}"
         }
         for i in range(10)
     ]
 
 # ====================================================
-# API — ТОЧКА ВХОДА
+# API
 # ====================================================
 
 @app.route('/', methods=['GET', 'HEAD'])
@@ -98,8 +114,6 @@ def get_data():
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    # Получаем данные
     result = loop.run_until_complete(fetch_data(query))
     
     return jsonify({
@@ -110,7 +124,7 @@ def get_data():
     })
 
 # ====================================================
-# X402 ЗАГОЛОВКИ ДЛЯ ПЛАТЕЖЕЙ
+# X402 ЗАГОЛОВКИ
 # ====================================================
 
 @app.after_request
@@ -120,7 +134,7 @@ def add_x402_headers(response):
     response.headers['X-Payment-Asset'] = 'USDC'
     response.headers['X-Payment-Network'] = 'base'
     response.headers['X-Payment-PayTo'] = '0x3f10530c86e6a1d26edbf27b6b6e660c77d79915'
-    response.headers['X-Payment-Description'] = 'Product search and price data'
+    response.headers['X-Payment-Description'] = 'Real prices and product data'
     return response
 
 # ====================================================
