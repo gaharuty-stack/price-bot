@@ -104,43 +104,36 @@ def fetch_real_prices_sync(query: str):
     if not symbol:
         return generate_market_data(query, count=5)
 
-    # Прямой IP Binance (получен через ping)
-    base_url = "https://13.32.91.204/api/v3/ticker/24hr"
-    headers = {
-        "User-Agent": "PriceBot/2.0 (Blackbox Research)",
-        "Host": "api.binance.com"
-    }
+    # Используем ALLOrigins как прокси для Binance
+    proxy_url = "https://api.allorigins.win/raw?url="
+    binance_url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
+    
+    try:
+        resp = requests.get(proxy_url + binance_url, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            price = float(data.get('lastPrice', 0))
+            change = float(data.get('priceChangePercent', 0))
+            high = float(data.get('highPrice', 0))
+            low = float(data.get('lowPrice', 0))
+            volume = float(data.get('quoteVolume', 0))
 
-    for attempt in range(3):
-        try:
-            url = f"{base_url}?symbol={symbol}"
-            resp = requests.get(url, headers=headers, timeout=10, verify=True)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                price = float(data.get('lastPrice', 0))
-                change = float(data.get('priceChangePercent', 0))
-                high = float(data.get('highPrice', 0))
-                low = float(data.get('lowPrice', 0))
-                volume = float(data.get('quoteVolume', 0))
-
-                return [{
-                    "id": 1,
-                    "name": f"{query.title()} ({symbol.replace('USDT', '')})",
-                    "price_usd": round(price, 2),
-                    "change_24h_percent": round(change, 2),
-                    "high_24h": round(high, 2),
-                    "low_24h": round(low, 2),
-                    "volume_24h": round(volume, 2),
-                    "source": "binance.com",
-                    "timestamp": datetime.now().isoformat(),
-                    "is_real": True
-                }]
-            else:
-                time.sleep(1)
-        except Exception as e:
-            logger.warning(f"Попытка {attempt+1} не удалась: {e}")
-            time.sleep(0.5)
+            return [{
+                "id": 1,
+                "name": f"{query.title()} ({symbol.replace('USDT', '')})",
+                "price_usd": round(price, 2),
+                "change_24h_percent": round(change, 2),
+                "high_24h": round(high, 2),
+                "low_24h": round(low, 2),
+                "volume_24h": round(volume, 2),
+                "source": "binance.com (via proxy)",
+                "timestamp": datetime.now().isoformat(),
+                "is_real": True
+            }]
+        else:
+            logger.warning(f"ALLOrigins вернул {resp.status_code}")
+    except Exception as e:
+        logger.error(f"Ошибка через ALLOrigins: {e}")
     
     return generate_market_data(query, count=5)
 
@@ -161,7 +154,7 @@ def get_data():
         logger.info(f"Кэш для {query}")
         response_data = cache[cache_key]
     else:
-        logger.info(f"Запрос к Binance: {query}")
+        logger.info(f"Запрос к Binance через прокси: {query}")
         result = fetch_real_prices_sync(query)
         response_data = {
             "status": "ok",
