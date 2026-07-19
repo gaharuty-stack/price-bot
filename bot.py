@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify, make_response
 import random
-import json
 import time
 from datetime import datetime
 import logging
@@ -17,7 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-cache = TTLCache(maxsize=200, ttl=120)  # 2 минуты для свежести
+cache = TTLCache(maxsize=200, ttl=120)
 
 def init_db():
     try:
@@ -51,7 +50,6 @@ def log_request(query: str, ip: str, status: int, paid: bool = False):
 
 app = Flask(__name__)
 
-# Конфигурация для x402
 PAYMENT_CONFIG = {
     "amount": "0.001",
     "currency": "USDC",
@@ -95,7 +93,6 @@ def generate_market_data(query: str, count: int = 5):
     return results
 
 def fetch_real_prices_sync(query: str):
-    """Синхронная обёртка для CoinGecko с таймаутом и ретраем"""
     coin_map = {
         "bitcoin": "bitcoin", "btc": "bitcoin",
         "ethereum": "ethereum", "eth": "ethereum",
@@ -152,14 +149,12 @@ def get_data():
     query = request.args.get('q', '').strip()
     client_ip = request.remote_addr
     
-    # Валидация ввода
     if not query:
         return jsonify({
             "error": "Missing parameter",
             "message": "Укажите ?q=bitcoin или ?q=ethereum"
         }), 400
     
-    # Санитайзинг
     if not re.match(r'^[a-zA-Z0-9\-\_\s]+$', query):
         return jsonify({
             "error": "Invalid query",
@@ -168,7 +163,6 @@ def get_data():
     
     cache_key = query.lower()
     
-    # Кэш
     if cache_key in cache:
         logger.info(f"Кэш для {query}")
         response_data = cache[cache_key]
@@ -184,7 +178,6 @@ def get_data():
         }
         cache[cache_key] = response_data
     
-    # Проверяем, был ли платёж (заголовок от Tollbooth)
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
     paid = bool(payment_tx and len(payment_tx) > 10)
     
@@ -192,11 +185,9 @@ def get_data():
     
     response = make_response(jsonify(response_data), 200)
     
-    # Добавляем платежные заголовки всегда
     for k, v in get_payment_headers().items():
         response.headers[k] = v
     
-    # Если платеж прошёл — добавляем подтверждение
     if paid:
         response.headers['X-Payment-Verified'] = 'true'
         response.headers['X-Payment-Tx-Hash'] = payment_tx
@@ -261,13 +252,34 @@ def root():
             "/api/data": "GET with ?q=bitcoin (payment required)",
             "/openapi.json": "OpenAPI specification",
             "/.well-known/x402": "x402 discovery endpoint"
-        },
-        "documentation": "https://price-bot-6erv.onrender.com/openapi.json"
+        }
     }
     response = make_response(jsonify(info), 200)
     for k, v in get_payment_headers().items():
         response.headers[k] = v
     return response
+
+@app.route('/admin/stats', methods=['GET'])
+def admin_stats():
+    if request.remote_addr not in ['127.0.0.1', '::1']:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    conn = sqlite3.connect('bot_stats.db')
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM requests")
+    total = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM requests WHERE paid = 1")
+    paid = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM requests WHERE status = 200")
+    success = c.fetchone()[0]
+    conn.close()
+    
+    return jsonify({
+        "total_requests": total,
+        "paid_requests": paid,
+        "successful_requests": success,
+        "conversion_rate": round(paid / max(total, 1) * 100, 2)
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)
