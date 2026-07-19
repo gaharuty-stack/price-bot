@@ -1,13 +1,12 @@
-from flask import Flask, request, jsonify, make_response, send_from_directory
+from flask import Flask, request, jsonify, make_response
 import random
 import json
 from datetime import datetime
-import os
 
 app = Flask(__name__)
 
 # ====================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ФУНКЦИИ
 # ====================================================
 
 def get_available_queries():
@@ -57,11 +56,23 @@ def generate_market_data(query: str, count: int = 10):
     return results
 
 def is_bot_or_scanner():
+    """
+    Определяет, является ли запрос от бота/сканера или от человека.
+    Если запрос имеет заголовок X-Payment-Required: true — это платёжный клиент (не сканер).
+    Если User-Agent содержит признаки бота — это сканер.
+    """
+    # Если есть заголовок X-Payment-Required: true — это платёжный клиент (не сканер)
+    if request.headers.get('X-Payment-Required', '').lower() == 'true':
+        return False  # Не сканер, это платёжный клиент
+    
+    # Проверяем User-Agent
     user_agent = request.headers.get('User-Agent', '').lower()
     bot_keywords = ['bot', 'scanner', 'crawler', 'spider', 'curl', 'wget', 'python-requests', 'go-http-client']
     for keyword in bot_keywords:
         if keyword in user_agent:
             return True
+    
+    # Если нет X-Payment-Required и User-Agent не ботовый — считаем обычным пользователем
     return False
 
 def add_x402_headers_to_response(response):
@@ -76,7 +87,7 @@ def add_x402_headers_to_response(response):
     return response
 
 # ====================================================
-# OPENAPI СПЕЦИФИКАЦИЯ (ГЛАВНЫЙ ФАЙЛ)
+# OPENAPI СПЕЦИФИКАЦИЯ (ДЛЯ X402SCAN)
 # ====================================================
 
 @app.route('/openapi.json', methods=['GET'])
@@ -108,29 +119,10 @@ def openapi_spec():
                         }
                     ],
                     "responses": {
-                        "200": {
-                            "description": "Successful response with data",
-                            "content": {
-                                "application/json": {
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "status": {"type": "string"},
-                                            "query": {"type": "string"},
-                                            "count": {"type": "integer"},
-                                            "data": {"type": "array"}
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        "402": {
-                            "description": "Payment Required"
-                        }
+                        "200": {"description": "Successful response"},
+                        "402": {"description": "Payment Required"}
                     },
-                    "security": [
-                        {"x402": []}
-                    ]
+                    "security": [{"x402": []}]
                 }
             }
         },
@@ -176,7 +168,8 @@ def root():
 def get_data():
     query = request.args.get('q', '')
     
-    # Если запрос от бота/сканера и нет параметра q — возвращаем 402
+    # === ЛОГИКА ДЛЯ СКАНЕРОВ ===
+    # Если запрос от сканера и нет параметра q — возвращаем 402
     if is_bot_or_scanner() and not query:
         response = make_response(jsonify({
             "error": "Payment Required",
@@ -195,7 +188,8 @@ def get_data():
         response = make_response(jsonify(data), 200)
         return add_x402_headers_to_response(response)
     
-    # Если запрос от бота/сканера с параметром q — возвращаем 402
+    # === ЛОГИКА ДЛЯ СКАНЕРОВ С ПАРАМЕТРОМ ===
+    # Если запрос от сканера и есть параметр q — возвращаем 402
     if is_bot_or_scanner():
         response = make_response(jsonify({
             "error": "Payment Required",
@@ -206,7 +200,7 @@ def get_data():
         }), 402)
         return add_x402_headers_to_response(response)
     
-    # Основная логика для людей (возвращаем данные с 200 OK)
+    # === ОСНОВНАЯ ЛОГИКА ДЛЯ ЛЮДЕЙ (200 OK) ===
     result = generate_market_data(query, count=10)
     data = {
         "status": "ok",
