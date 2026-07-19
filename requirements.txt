@@ -2,3 +2,4 @@ flask
 aiohttp
 beautifulsoup4
 lxml
+cachetools
