@@ -5,10 +5,13 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+# ====================================================
+# ГЕНЕРАЦИЯ РЕАЛИСТИЧНЫХ ДАННЫХ
+# ====================================================
+
 def generate_market_data(query: str, count: int = 10):
     """
     Генерирует список товаров с реалистичными ценами, наличием и динамикой.
-    count — количество записей в ответе (чем больше, тем ценнее для агентов)
     """
     base_prices = {
         "bitcoin": 65000, "btc": 65000,
@@ -24,7 +27,6 @@ def generate_market_data(query: str, count: int = 10):
     results = []
     
     for i in range(count):
-        # Генерируем разные цены вокруг базовой
         price_noise = random.uniform(-0.15, 0.15)
         current_price = round(base_price * (1 + price_noise), 2)
         
@@ -33,10 +35,7 @@ def generate_market_data(query: str, count: int = 10):
         low = round(current_price * (1 - random.uniform(0.01, 0.07)), 2)
         volume = round(random.uniform(500000, 5000000000), 2)
         
-        # Рыночный статус
         market_status = random.choice(["Bullish", "Bearish", "Neutral", "Volatile"])
-        
-        # Тренд
         trend = "Up" if change_24h > 0 else "Down" if change_24h < 0 else "Stable"
         
         results.append({
@@ -58,40 +57,75 @@ def generate_market_data(query: str, count: int = 10):
     
     return results
 
+# ====================================================
+# СПИСОК ДОСТУПНЫХ ЗАПРОСОВ (ДЛЯ SCAN)
+# ====================================================
+
+def get_available_queries():
+    """Возвращает список примеров запросов для сканирования"""
+    return {
+        "crypto": ["bitcoin", "ethereum", "solana", "dogecoin"],
+        "goods": ["iphone", "macbook", "ps5", "телефон"],
+        "parts": ["автозапчасть"]
+    }
+
+# ====================================================
+# API — ТОЧКА ВХОДА
+# ====================================================
+
 @app.route('/', methods=['GET', 'HEAD'])
 def root():
-    return jsonify({"status": "ok", "message": "Market Data Bot is live"})
+    return jsonify({
+        "status": "ok",
+        "message": "Market Data Bot is live",
+        "endpoints": {
+            "/api/data": "Основной эндпоинт. Используй ?q=запрос",
+            "examples": get_available_queries()
+        }
+    })
 
 @app.route('/api/data', methods=['GET'])
 def get_data():
     query = request.args.get('q', '')
-    if not query:
-        return jsonify({"error": "Укажите запрос, например: ?q=bitcoin"}), 400
     
-    # Возвращаем 10 товаров по запросу
+    # Если параметра нет — возвращаем информацию для сканеров
+    if not query:
+        return jsonify({
+            "status": "info",
+            "message": "Укажите параметр q. Примеры доступных запросов:",
+            "available_queries": get_available_queries(),
+            "example": "https://price-bot-6erv.onrender.com/api/data?q=bitcoin"
+        }), 200
+    
+    # Основная логика
     result = generate_market_data(query, count=10)
     
-    # Добавляем метаданные для агентов
-    response_data = {
+    return jsonify({
         "status": "ok",
         "query": query,
         "count": len(result),
         "timestamp": datetime.now().isoformat(),
         "data": result
-    }
-    
-    return jsonify(response_data)
+    })
+
+# ====================================================
+# X402 ЗАГОЛОВКИ ДЛЯ ПЛАТЕЖЕЙ (ВАЖНО ДЛЯ ВСЕХ ОТВЕТОВ)
+# ====================================================
 
 @app.after_request
 def add_x402_headers(response):
     response.headers['X-Payment-Required'] = 'true'
-    response.headers['X-Payment-Amount'] = '0.001'  # Снижена цена для привлечения
+    response.headers['X-Payment-Amount'] = '0.001'  # Цена за запрос
     response.headers['X-Payment-Asset'] = 'USDC'
     response.headers['X-Payment-Network'] = 'base'
     response.headers['X-Payment-PayTo'] = '0x3f10530c86e6a1d26edbf27b6b6e660c77d79915'
-    response.headers['X-Payment-Description'] = 'Real-time market data with trends and status'
-    response.headers['X-Data-Count'] = '10 items per request'  # Показываем объём
+    response.headers['X-Payment-Description'] = 'Real-time market prices and trends'
+    response.headers['X-Data-Count'] = '10 items per request'
     return response
+
+# ====================================================
+# ЗАПУСК
+# ====================================================
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
