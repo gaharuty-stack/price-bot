@@ -57,8 +57,6 @@ PAYMENT_CONFIG = {
     "receiver": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915"
 }
 
-COINGECKO_API_KEY = "CG-MAyw674wsFCM6p3hJdSR6nU4"
-
 def get_payment_headers():
     return {
         "X-Payment-Required": PAYMENT_CONFIG["amount"],
@@ -92,8 +90,8 @@ def fetch_real_prices_sync(query: str):
         logger.warning(f"Неизвестная монета: {query}")
         return None
     
-    # ИСПРАВЛЕННЫЙ URL ДЛЯ PRO-API
-    url = f"https://pro-api.coingecko.com/api/v3/coins/{coin_id}"
+    # Публичный эндпоинт без ключа
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
     params = {
         "localization": "false",
         "tickers": "false",
@@ -105,11 +103,10 @@ def fetch_real_prices_sync(query: str):
     
     headers = {
         "User-Agent": "PriceBot/2.0 (Blackbox Research)",
-        "Accept": "application/json",
-        "x-cg-pro-api-key": COINGECKO_API_KEY
+        "Accept": "application/json"
     }
     
-    logger.info(f"Запрос к CoinGecko Pro API для {coin_id}")
+    logger.info(f"Запрос к публичному CoinGecko API для {coin_id}")
     
     for attempt in range(3):
         try:
@@ -141,7 +138,7 @@ def fetch_real_prices_sync(query: str):
                     "low_24h": round(low, 2),
                     "volume_24h": round(volume, 2),
                     "market_cap_usd": round(market_cap, 2),
-                    "source": "coingecko.com (real)",
+                    "source": "coingecko.com (public)",
                     "timestamp": datetime.now().isoformat(),
                     "is_real": True,
                     "coin_id": coin_id
@@ -151,10 +148,6 @@ def fetch_real_prices_sync(query: str):
                 logger.warning(f"Лимит запросов, попытка {attempt+1}/3, ждём {2 * (attempt + 1)}с")
                 time.sleep(2 * (attempt + 1))
                 continue
-            
-            elif resp.status_code == 401:
-                logger.error("Неверный API-ключ, проверьте COINGECKO_API_KEY")
-                break
             
             else:
                 logger.error(f"CoinGecko вернул {resp.status_code}: {resp.text[:200]}")
@@ -278,7 +271,7 @@ def openapi_spec():
         "info": {
             "title": "Price Bot API",
             "version": "2.1.0",
-            "description": "Real-time cryptocurrency prices via CoinGecko Pro API. Payment: 0.001 USDC on Base.",
+            "description": "Real-time cryptocurrency prices via CoinGecko. Payment: 0.001 USDC on Base.",
             "x402": {
                 "price": PAYMENT_CONFIG["amount"],
                 "currency": PAYMENT_CONFIG["currency"],
@@ -324,7 +317,7 @@ def root():
     info = {
         "status": "ok",
         "service": "Price Bot v2.1",
-        "description": "Real cryptocurrency prices via CoinGecko Pro",
+        "description": "Real cryptocurrency prices via CoinGecko",
         "payment": PAYMENT_CONFIG,
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin (payment required)",
