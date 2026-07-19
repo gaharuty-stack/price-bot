@@ -2,6 +2,66 @@ from flask import Flask, request, jsonify, make_response
 import random
 import json
 from datetime import datetime
+import logging
+import aiohttp
+import asyncio
+from cachetools import TTLCache
+import sqlite3
+import os
+
+# ====================================================
+# НАСТРОЙКА ЛОГИРОВАНИЯ
+# ====================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+# ====================================================
+# НАСТРОЙКА КЕША (5 минут)
+# ====================================================
+
+cache = TTLCache(maxsize=100, ttl=300)
+
+# ====================================================
+# НАСТРОЙКА БАЗЫ ДАННЫХ
+# ====================================================
+
+def init_db():
+    try:
+        conn = sqlite3.connect('bot_stats.db')
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS requests
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      query TEXT,
+                      timestamp TEXT,
+                      ip TEXT,
+                      status INTEGER)''')
+        conn.commit()
+        conn.close()
+        logger.info("База данных инициализирована")
+    except Exception as e:
+        logger.error(f"Ошибка инициализации БД: {e}")
+
+init_db()
+
+def log_request(query: str, ip: str, status: int):
+    try:
+        conn = sqlite3.connect('bot_stats.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO requests (query, timestamp, ip, status) VALUES (?, ?, ?, ?)",
+                  (query, datetime.now().isoformat(), ip, status))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Ошибка записи в БД: {e}")
+
+# ====================================================
+# APP
+# ====================================================
 
 app = Flask(__name__)
 
@@ -17,6 +77,7 @@ def get_available_queries():
     }
 
 def generate_market_data(query: str, count: int = 10):
+    """Генерирует реалистичные данные (фолбэк, если API не работает)"""
     base_prices = {
         "bitcoin": 65000, "btc": 65000,
         "ethereum": 3500, "eth": 3500,
@@ -49,45 +110,93 @@ def generate_market_data(query: str, count: int = 10):
             "market_status": market_status,
             "trend": trend,
             "in_stock": random.random() > 0.2,
-            "source": "market-data-api.com",
+            "source": "generated",
             "timestamp": datetime.now().isoformat(),
-            "is_real_data": True
+            "is_real_data": False
         })
     return results
 
-def is_bot_or_scanner():
+async def fetch_real_prices(query: str):
     """
-    Определяет, является ли запрос от бота/сканера или от человека.
-    Если запрос имеет заголовок X-Payment-Required: true — это платёжный клиент (не сканер).
-    Если User-Agent содержит признаки бота — это сканер.
+    Получает реальные цены с CoinGecko API.
+    Если API недоступен — возвращает сгенерированные данные.
     """
-    # Если есть заголовок X-Payment-Required: true — это платёжный клиент (не сканер)
-    if request.headers.get('X-Payment-Required', '').lower() == 'true':
-        return False  # Не сканер, это платёжный клиент
+    coin_map = {
+        "bitcoin": "bitcoin", "btc": "bitcoin",
+        "ethereum": "ethereum", "eth": "ethereum",
+        "solana": "solana", "sol": "solana",
+        "dogecoin": "dogecoin", "doge": "dogecoin",
+        "cardano": "cardano", "ada": "cardano",
+        "ripple": "ripple", "xrp": "ripple"
+    }
+    coin_id = coin_map.get(query.lower(), "bitcoin")
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
     
-    # Проверяем User-Agent
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    price = data.get('market_data', {}).get('current_price', {}).get('usd', 0)
+                    change = data.get('market_data', {}).get('price_change_percentage_24h', 0)
+                    high = data.get('market_data', {}).get('high_24h', {}).get('usd', price * 1.05)
+                    low = data.get('market_data', {}).get('low_24h', {}).get('usd', price * 0.95)
+                    volume = data.get('market_data', {}).get('total_volume', {}).get('usd', 0)
+                    market_cap = data.get('market_data', {}).get('market_cap', {}).get('usd', 0)
+                    name = data.get('name', query.title())
+                    symbol = data.get('symbol', '').upper()
+                    
+                    return [{
+                        "id": 1,
+                        "name": f"{name} ({symbol})",
+                        "price_usd": round(price, 2),
+                        "price_btc": round(price / 65000, 8),
+                        "change_24h_percent": round(change, 2),
+                        "high_24h": round(high, 2),
+                        "low_24h": round(low, 2),
+                        "volume_24h": round(volume, 2),
+                        "market_cap_usd": round(market_cap, 2),
+                        "market_status": "Bullish" if change > 0 else "Bearish" if change < 0 else "Neutral",
+                        "trend": "Up" if change > 0 else "Down" if change < 0 else "Stable",
+                        "in_stock": True,
+                        "source": "coingecko.com",
+                        "timestamp": datetime.now().isoformat(),
+                        "is_real_data": True
+                    }]
+                else:
+                    logger.warning(f"CoinGecko вернул {resp.status}, используем генерацию")
+                    return generate_market_data(query, count=5)
+        except Exception as e:
+            logger.error(f"Ошибка CoinGecko: {e}, используем генерацию")
+            return generate_market_data(query, count=5)
+
+def is_bot_or_scanner():
+    if request.headers.get('X-Payment-Required', '').lower() == 'true':
+        return False
     user_agent = request.headers.get('User-Agent', '').lower()
     bot_keywords = ['bot', 'scanner', 'crawler', 'spider', 'curl', 'wget', 'python-requests', 'go-http-client']
     for keyword in bot_keywords:
         if keyword in user_agent:
             return True
-    
-    # Если нет X-Payment-Required и User-Agent не ботовый — считаем обычным пользователем
     return False
 
 def add_x402_headers_to_response(response):
-    """Добавляет x402-заголовки в ответ."""
     response.headers['X-Payment-Required'] = 'true'
     response.headers['X-Payment-Amount'] = '0.001'
     response.headers['X-Payment-Asset'] = 'USDC'
     response.headers['X-Payment-Network'] = 'base'
     response.headers['X-Payment-PayTo'] = '0x3f10530c86e6a1d26edbf27b6b6e660c77d79915'
-    response.headers['X-Payment-Description'] = 'Real-time market prices and trends'
-    response.headers['X-Data-Count'] = '10 items per request'
+    response.headers['X-Payment-Description'] = 'Real-time market prices from CoinGecko'
+    response.headers['X-Data-Count'] = '1 item per request'
     return response
 
 # ====================================================
-# OPENAPI СПЕЦИФИКАЦИЯ (ДЛЯ X402SCAN)
+# OPENAPI СПЕЦИФИКАЦИЯ
 # ====================================================
 
 @app.route('/openapi.json', methods=['GET'])
@@ -97,29 +206,24 @@ def openapi_spec():
         "info": {
             "title": "Price Bot API",
             "version": "1.0.0",
-            "description": "Market data API with x402 payments. Price: 0.001 USDC per request."
+            "description": "Real-time cryptocurrency prices via CoinGecko. Price: 0.001 USDC per request."
         },
-        "servers": [
-            {
-                "url": "https://price-bot-6erv.onrender.com",
-                "description": "Production server"
-            }
-        ],
+        "servers": [{"url": "https://price-bot-6erv.onrender.com"}],
         "paths": {
             "/api/data": {
                 "get": {
-                    "summary": "Get market data by query",
+                    "summary": "Get real-time price data",
                     "parameters": [
                         {
                             "name": "q",
                             "in": "query",
                             "required": True,
                             "schema": {"type": "string"},
-                            "description": "Search query (e.g., bitcoin, iphone)"
+                            "description": "e.g., bitcoin, ethereum, solana"
                         }
                     ],
                     "responses": {
-                        "200": {"description": "Successful response"},
+                        "200": {"description": "Price data"},
                         "402": {"description": "Payment Required"}
                     },
                     "security": [{"x402": []}]
@@ -131,8 +235,7 @@ def openapi_spec():
                 "x402": {
                     "type": "apiKey",
                     "in": "header",
-                    "name": "X-Payment-Required",
-                    "description": "x402 payment header"
+                    "name": "X-Payment-Required"
                 }
             }
         }
@@ -142,7 +245,6 @@ def openapi_spec():
 
 @app.route('/.well-known/x402', methods=['GET'])
 def well_known_x402():
-    """Стандартный путь для x402 Discovery"""
     return openapi_spec()
 
 # ====================================================
@@ -153,12 +255,11 @@ def well_known_x402():
 def root():
     data = {
         "status": "ok",
-        "message": "Market Data Bot is live",
+        "message": "Price Bot with real CoinGecko data",
         "endpoints": {
-            "/api/data": "Основной эндпоинт. Используй ?q=запрос",
-            "/openapi.json": "OpenAPI спецификация",
-            "/.well-known/x402": "x402 Discovery endpoint",
-            "examples": get_available_queries()
+            "/api/data": "Use ?q=bitcoin to get real prices",
+            "/openapi.json": "OpenAPI spec",
+            "/.well-known/x402": "x402 discovery"
         }
     }
     response = make_response(jsonify(data), 200)
@@ -167,41 +268,44 @@ def root():
 @app.route('/api/data', methods=['GET'])
 def get_data():
     query = request.args.get('q', '')
+    client_ip = request.remote_addr
     
-    # === ЛОГИКА ДЛЯ СКАНЕРОВ ===
-    # Если запрос от сканера и нет параметра q — возвращаем 402
-    if is_bot_or_scanner() and not query:
-        response = make_response(jsonify({
-            "error": "Payment Required",
-            "message": "This API requires payment. Use ?q=bitcoin to get data."
-        }), 402)
-        return add_x402_headers_to_response(response)
-    
-    # Если параметра нет — возвращаем информацию для людей
-    if not query:
-        data = {
-            "status": "info",
-            "message": "Укажите параметр q. Примеры доступных запросов:",
-            "available_queries": get_available_queries(),
-            "example": "https://price-bot-6erv.onrender.com/api/data?q=bitcoin"
-        }
-        response = make_response(jsonify(data), 200)
-        return add_x402_headers_to_response(response)
-    
-    # === ЛОГИКА ДЛЯ СКАНЕРОВ С ПАРАМЕТРОМ ===
-    # Если запрос от сканера и есть параметр q — возвращаем 402
+    # Проверка на сканеров
     if is_bot_or_scanner():
+        log_request(query, client_ip, 402)
         response = make_response(jsonify({
             "error": "Payment Required",
-            "message": "This API requires payment to access data.",
+            "message": "Pay 0.001 USDC to access real CoinGecko prices",
             "price": "0.001 USDC",
             "pay_to": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915",
             "network": "base"
         }), 402)
         return add_x402_headers_to_response(response)
     
-    # === ОСНОВНАЯ ЛОГИКА ДЛЯ ЛЮДЕЙ (200 OK) ===
-    result = generate_market_data(query, count=10)
+    if not query:
+        data = {
+            "status": "info",
+            "message": "Укажите параметр q. Примеры: bitcoin, ethereum, solana, dogecoin"
+        }
+        response = make_response(jsonify(data), 200)
+        log_request(query, client_ip, 200)
+        return add_x402_headers_to_response(response)
+    
+    # Проверка кеша
+    cache_key = query.lower()
+    if cache_key in cache:
+        logger.info(f"Кеш-хит для {query}")
+        response = make_response(jsonify(cache[cache_key]), 200)
+        log_request(query, client_ip, 200)
+        return add_x402_headers_to_response(response)
+    
+    # Получение реальных данных
+    logger.info(f"Запрос к CoinGecko для {query} от {client_ip}")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(fetch_real_prices(query))
+    loop.close()
+    
     data = {
         "status": "ok",
         "query": query,
@@ -209,6 +313,11 @@ def get_data():
         "timestamp": datetime.now().isoformat(),
         "data": result
     }
+    
+    # Сохраняем в кеш
+    cache[cache_key] = data
+    log_request(query, client_ip, 200)
+    
     response = make_response(jsonify(data), 200)
     return add_x402_headers_to_response(response)
 
