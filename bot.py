@@ -92,7 +92,8 @@ def fetch_real_prices_sync(query: str):
         logger.warning(f"Неизвестная монета: {query}")
         return None
     
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+    # ИСПРАВЛЕННЫЙ URL ДЛЯ PRO-API
+    url = f"https://pro-api.coingecko.com/api/v3/coins/{coin_id}"
     params = {
         "localization": "false",
         "tickers": "false",
