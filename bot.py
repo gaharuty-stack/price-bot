@@ -1,12 +1,13 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, send_from_directory
 import random
 import json
 from datetime import datetime
+import os
 
 app = Flask(__name__)
 
 # ====================================================
-# ФУНКЦИИ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ====================================================
 
 def get_available_queries():
@@ -64,6 +65,7 @@ def is_bot_or_scanner():
     return False
 
 def add_x402_headers_to_response(response):
+    """Добавляет x402-заголовки в ответ."""
     response.headers['X-Payment-Required'] = 'true'
     response.headers['X-Payment-Amount'] = '0.001'
     response.headers['X-Payment-Asset'] = 'USDC'
@@ -74,7 +76,7 @@ def add_x402_headers_to_response(response):
     return response
 
 # ====================================================
-# ОТКРЫТАЯ OPENAPI-СПЕЦИФИКАЦИЯ (ДЛЯ X402SCAN)
+# OPENAPI СПЕЦИФИКАЦИЯ (ГЛАВНЫЙ ФАЙЛ)
 # ====================================================
 
 @app.route('/openapi.json', methods=['GET'])
@@ -86,6 +88,12 @@ def openapi_spec():
             "version": "1.0.0",
             "description": "Market data API with x402 payments. Price: 0.001 USDC per request."
         },
+        "servers": [
+            {
+                "url": "https://price-bot-6erv.onrender.com",
+                "description": "Production server"
+            }
+        ],
         "paths": {
             "/api/data": {
                 "get": {
@@ -117,9 +125,12 @@ def openapi_spec():
                             }
                         },
                         "402": {
-                            "description": "Payment Required — send USDC to the specified address"
+                            "description": "Payment Required"
                         }
-                    }
+                    },
+                    "security": [
+                        {"x402": []}
+                    ]
                 }
             }
         },
@@ -129,17 +140,21 @@ def openapi_spec():
                     "type": "apiKey",
                     "in": "header",
                     "name": "X-Payment-Required",
-                    "description": "Set to 'true' to confirm payment"
+                    "description": "x402 payment header"
                 }
             }
-        },
-        "security": [{"x402": []}]
+        }
     }
     response = make_response(jsonify(spec), 200)
     return add_x402_headers_to_response(response)
 
+@app.route('/.well-known/x402', methods=['GET'])
+def well_known_x402():
+    """Стандартный путь для x402 Discovery"""
+    return openapi_spec()
+
 # ====================================================
-# ЭНДПОИНТЫ
+# ОСНОВНЫЕ ЭНДПОИНТЫ
 # ====================================================
 
 @app.route('/', methods=['GET', 'HEAD'])
@@ -149,7 +164,8 @@ def root():
         "message": "Market Data Bot is live",
         "endpoints": {
             "/api/data": "Основной эндпоинт. Используй ?q=запрос",
-            "/openapi.json": "OpenAPI спецификация для сканеров",
+            "/openapi.json": "OpenAPI спецификация",
+            "/.well-known/x402": "x402 Discovery endpoint",
             "examples": get_available_queries()
         }
     }
