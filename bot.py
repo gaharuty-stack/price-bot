@@ -64,8 +64,21 @@ def get_payment_headers():
         "X-Payment-Currency": PAYMENT_CONFIG["currency"],
         "X-Payment-Network": PAYMENT_CONFIG["network"],
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
-        "X-Payment-Description": "Real-time market price data from CoinGecko"
+        "X-Payment-Description": "Real-time market price data from Binance"
     }
+
+# ====================================================
+# СООТВЕТСТВИЕ МОНЕТ ИХ ТИКЕРАМ НА BINANCE
+# ====================================================
+
+BINANCE_SYMBOLS = {
+    "bitcoin": "BTCUSDT", "btc": "BTCUSDT",
+    "ethereum": "ETHUSDT", "eth": "ETHUSDT",
+    "solana": "SOLUSDT", "sol": "SOLUSDT",
+    "dogecoin": "DOGEUSDT", "doge": "DOGEUSDT",
+    "cardano": "ADAUSDT", "ada": "ADAUSDT",
+    "ripple": "XRPUSDT", "xrp": "XRPUSDT"
+}
 
 def generate_market_data(query: str, count: int = 5):
     base_prices = {
@@ -93,57 +106,62 @@ def generate_market_data(query: str, count: int = 5):
         })
     return results
 
+# ====================================================
+# BINANCE API (СИНХРОННЫЙ, БЕЗ API-КЛЮЧА)
+# ====================================================
+
 def fetch_real_prices_sync(query: str):
-    coin_map = {
-        "bitcoin": "bitcoin", "btc": "bitcoin",
-        "ethereum": "ethereum", "eth": "ethereum",
-        "solana": "solana", "sol": "solana",
-        "dogecoin": "dogecoin", "doge": "dogecoin",
-        "cardano": "cardano", "ada": "cardano",
-        "ripple": "ripple", "xrp": "ripple"
-    }
-    coin_id = coin_map.get(query.lower(), "bitcoin")
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+    symbol = BINANCE_SYMBOLS.get(query.lower())
+    if not symbol:
+        return generate_market_data(query, count=5)
+
     headers = {"User-Agent": "PriceBot/2.0 (Blackbox Research)"}
-
+    mirrors = [
+        "https://api.binance.com/api/v3/ticker/24hr",
+        "https://api1.binance.com/api/v3/ticker/24hr",
+        "https://api2.binance.com/api/v3/ticker/24hr",
+        "https://api3.binance.com/api/v3/ticker/24hr"
+    ]
+    
     for attempt in range(3):
-        try:
-            resp = requests.get(url, headers=headers, timeout=8)
-            if resp.status_code == 200:
-                data = resp.json()
-                market = data.get('market_data', {})
-                price = market.get('current_price', {}).get('usd', 0)
-                change = market.get('price_change_percentage_24h', 0)
-                high = market.get('high_24h', {}).get('usd', price * 1.05)
-                low = market.get('low_24h', {}).get('usd', price * 0.95)
-                volume = market.get('total_volume', {}).get('usd', 0)
-                market_cap = market.get('market_cap', {}).get('usd', 0)
-                name = data.get('name', query.title())
-                symbol = data.get('symbol', '').upper()
+        for mirror in mirrors:
+            try:
+                url = f"{mirror}?symbol={symbol}"
+                resp = requests.get(url, headers=headers, timeout=10)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    price = float(data.get('lastPrice', 0))
+                    change = float(data.get('priceChangePercent', 0))
+                    high = float(data.get('highPrice', 0))
+                    low = float(data.get('lowPrice', 0))
+                    volume = float(data.get('quoteVolume', 0))
 
-                return [{
-                    "id": 1,
-                    "name": f"{name} ({symbol})",
-                    "price_usd": round(price, 2),
-                    "change_24h_percent": round(change, 2),
-                    "high_24h": round(high, 2),
-                    "low_24h": round(low, 2),
-                    "volume_24h": round(volume, 2),
-                    "market_cap_usd": round(market_cap, 2),
-                    "source": "coingecko.com",
-                    "timestamp": datetime.now().isoformat(),
-                    "is_real": True
-                }]
-            elif resp.status_code == 429:
-                time.sleep(1 * (attempt + 1))
+                    return [{
+                        "id": 1,
+                        "name": f"{query.title()} ({symbol.replace('USDT', '')})",
+                        "price_usd": round(price, 2),
+                        "change_24h_percent": round(change, 2),
+                        "high_24h": round(high, 2),
+                        "low_24h": round(low, 2),
+                        "volume_24h": round(volume, 2),
+                        "source": "binance.com",
+                        "timestamp": datetime.now().isoformat(),
+                        "is_real": True
+                    }]
+                elif resp.status_code == 429:
+                    time.sleep(1 * (attempt + 1))
+                    continue
+            except Exception as e:
+                logger.warning(f"Попытка {attempt+1} на {mirror} не удалась: {e}")
+                time.sleep(0.5)
                 continue
-            else:
-                break
-        except Exception as e:
-            logger.warning(f"Попытка {attempt+1} не удалась: {e}")
-            time.sleep(0.5)
-
+    
     return generate_market_data(query, count=5)
+
+# ====================================================
+# ОСНОВНОЙ ЭНДПОИНТ
+# ====================================================
 
 @app.route('/api/data', methods=['GET'])
 def get_data():
@@ -168,7 +186,7 @@ def get_data():
         logger.info(f"Кэш для {query}")
         response_data = cache[cache_key]
     else:
-        logger.info(f"Запрос к CoinGecko: {query}")
+        logger.info(f"Запрос к Binance: {query}")
         result = fetch_real_prices_sync(query)
         response_data = {
             "status": "ok",
@@ -195,6 +213,10 @@ def get_data():
 
     return response
 
+# ====================================================
+# OPENAPI СПЕЦИФИКАЦИЯ
+# ====================================================
+
 @app.route('/openapi.json', methods=['GET'])
 def openapi_spec():
     spec = {
@@ -202,7 +224,7 @@ def openapi_spec():
         "info": {
             "title": "Price Bot API",
             "version": "2.0.0",
-            "description": "Real-time cryptocurrency prices via CoinGecko. Payment: 0.001 USDC on Base.",
+            "description": "Real-time cryptocurrency prices via Binance. Payment: 0.001 USDC on Base.",
             "x402": {
                 "price": PAYMENT_CONFIG["amount"],
                 "currency": PAYMENT_CONFIG["currency"],
@@ -247,7 +269,7 @@ def root():
     info = {
         "status": "ok",
         "service": "Price Bot v2.0",
-        "description": "Real cryptocurrency prices via CoinGecko",
+        "description": "Real cryptocurrency prices via Binance",
         "payment": PAYMENT_CONFIG,
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin (payment required)",
