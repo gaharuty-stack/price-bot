@@ -5,7 +5,6 @@ import logging
 import requests
 from cachetools import TTLCache
 import sqlite3
-import os
 import re
 
 logging.basicConfig(
@@ -63,10 +62,11 @@ def get_payment_headers():
         "X-Payment-Currency": PAYMENT_CONFIG["currency"],
         "X-Payment-Network": PAYMENT_CONFIG["network"],
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
-        "X-Payment-Description": "Real-time market price data from CoinGecko"
+        "X-Payment-Description": "Real-time crypto prices from CoinCap API"
     }
 
 def fetch_real_prices_sync(query: str):
+    # CoinCap ID mapping (используются их внутренние ID)
     coin_map = {
         "bitcoin": "bitcoin", "btc": "bitcoin",
         "ethereum": "ethereum", "eth": "ethereum",
@@ -78,7 +78,6 @@ def fetch_real_prices_sync(query: str):
         "chainlink": "chainlink", "link": "chainlink",
         "polygon": "polygon", "matic": "polygon",
         "litecoin": "litecoin", "ltc": "litecoin",
-        "bitcoin-cash": "bitcoin-cash", "bch": "bitcoin-cash",
         "stellar": "stellar", "xlm": "stellar",
         "monero": "monero", "xmr": "monero",
         "avalanche": "avalanche-2", "avax": "avalanche-2",
@@ -90,67 +89,55 @@ def fetch_real_prices_sync(query: str):
         logger.warning(f"Неизвестная монета: {query}")
         return None
     
-    # Публичный эндпоинт без ключа
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
-    params = {
-        "localization": "false",
-        "tickers": "false",
-        "market_data": "true",
-        "community_data": "false",
-        "developer_data": "false",
-        "sparkline": "false"
-    }
+    # CoinCap API (бесплатно, без ключа)
+    url = f"https://api.coincap.io/v2/assets/{coin_id}"
     
     headers = {
         "User-Agent": "PriceBot/2.0 (Blackbox Research)",
         "Accept": "application/json"
     }
     
-    logger.info(f"Запрос к публичному CoinGecko API для {coin_id}")
+    logger.info(f"Запрос к CoinCap API для {coin_id}")
     
     for attempt in range(3):
         try:
-            resp = requests.get(url, params=params, headers=headers, timeout=10)
+            resp = requests.get(url, headers=headers, timeout=10)
             
             if resp.status_code == 200:
                 data = resp.json()
-                market = data.get('market_data', {})
+                asset = data.get('data', {})
                 
-                price = market.get('current_price', {}).get('usd', 0)
+                price = float(asset.get('priceUsd', 0))
                 if price == 0:
                     logger.warning(f"Цена для {coin_id} не найдена")
                     break
                 
-                change = market.get('price_change_percentage_24h', 0)
-                high = market.get('high_24h', {}).get('usd', price * 1.05)
-                low = market.get('low_24h', {}).get('usd', price * 0.95)
-                volume = market.get('total_volume', {}).get('usd', 0)
-                market_cap = market.get('market_cap', {}).get('usd', 0)
-                name = data.get('name', query.title())
-                symbol = data.get('symbol', '').upper()
+                change = float(asset.get('changePercent24Hr', 0))
+                volume = float(asset.get('volumeUsd24Hr', 0))
+                market_cap = float(asset.get('marketCapUsd', 0))
+                name = asset.get('name', query.title())
+                symbol = asset.get('symbol', '').upper()
                 
                 return {
                     "id": 1,
                     "name": f"{name} ({symbol})",
                     "price_usd": round(price, 4),
                     "change_24h_percent": round(change, 2),
-                    "high_24h": round(high, 2),
-                    "low_24h": round(low, 2),
                     "volume_24h": round(volume, 2),
                     "market_cap_usd": round(market_cap, 2),
-                    "source": "coingecko.com (public)",
+                    "source": "coincap.io (real)",
                     "timestamp": datetime.now().isoformat(),
                     "is_real": True,
                     "coin_id": coin_id
                 }
             
             elif resp.status_code == 429:
-                logger.warning(f"Лимит запросов, попытка {attempt+1}/3, ждём {2 * (attempt + 1)}с")
-                time.sleep(2 * (attempt + 1))
+                logger.warning(f"Лимит запросов, попытка {attempt+1}/3, ждём 2с")
+                time.sleep(2)
                 continue
             
             else:
-                logger.error(f"CoinGecko вернул {resp.status_code}: {resp.text[:200]}")
+                logger.error(f"CoinCap вернул {resp.status_code}: {resp.text[:200]}")
                 break
                 
         except requests.exceptions.Timeout:
@@ -188,7 +175,7 @@ def get_data():
         response_data = cache[cache_key]
         source = "cache"
     else:
-        logger.info(f"Запрос к CoinGecko: {query}")
+        logger.info(f"Запрос к CoinCap: {query}")
         real_data = fetch_real_prices_sync(query)
         
         if real_data:
@@ -198,10 +185,10 @@ def get_data():
                 "count": 1,
                 "timestamp": datetime.now().isoformat(),
                 "data": [real_data],
-                "source": "coingecko"
+                "source": "coincap"
             }
             cache[cache_key] = response_data
-            source = "coingecko"
+            source = "coincap"
         else:
             fallback_prices = {
                 "bitcoin": {"price": 64523.12, "change": 2.34},
@@ -233,7 +220,7 @@ def get_data():
                         "source": "historical_fallback",
                         "timestamp": datetime.now().isoformat(),
                         "is_real": False,
-                        "note": "CoinGecko API временно недоступен"
+                        "note": "CoinCap API временно недоступен"
                     }],
                     "source": "fallback"
                 }
@@ -242,7 +229,7 @@ def get_data():
             else:
                 return jsonify({
                     "error": "Unknown coin",
-                    "message": f"Монета '{query}' не найдена. Доступны: bitcoin, ethereum, solana, dogecoin, cardano, ripple, polkadot, chainlink, polygon, litecoin, bitcoin-cash, stellar, monero, avalanche, shiba-inu"
+                    "message": f"Монета '{query}' не найдена. Доступны: bitcoin, ethereum, solana, dogecoin, cardano, ripple, polkadot, chainlink, polygon, litecoin, stellar, monero, avalanche, shiba-inu"
                 }), 404
     
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
@@ -270,8 +257,8 @@ def openapi_spec():
         "openapi": "3.0.0",
         "info": {
             "title": "Price Bot API",
-            "version": "2.1.0",
-            "description": "Real-time cryptocurrency prices via CoinGecko. Payment: 0.001 USDC on Base.",
+            "version": "2.2.0",
+            "description": "Real-time cryptocurrency prices via CoinCap API (free, no key). Payment: 0.001 USDC on Base.",
             "x402": {
                 "price": PAYMENT_CONFIG["amount"],
                 "currency": PAYMENT_CONFIG["currency"],
@@ -290,7 +277,7 @@ def openapi_spec():
                             "in": "query",
                             "required": True,
                             "schema": {"type": "string", "example": "bitcoin"},
-                            "description": "ID монеты: bitcoin, ethereum, solana, dogecoin, cardano, ripple, polkadot, chainlink, polygon, litecoin, bitcoin-cash, stellar, monero, avalanche, shiba-inu"
+                            "description": "ID монеты: bitcoin, ethereum, solana, dogecoin, cardano, ripple, polkadot, chainlink, polygon, litecoin, stellar, monero, avalanche, shiba-inu"
                         }
                     ],
                     "responses": {
@@ -316,8 +303,8 @@ def well_known_x402():
 def root():
     info = {
         "status": "ok",
-        "service": "Price Bot v2.1",
-        "description": "Real cryptocurrency prices via CoinGecko",
+        "service": "Price Bot v2.2",
+        "description": "Real cryptocurrency prices via CoinCap API (no key required)",
         "payment": PAYMENT_CONFIG,
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin (payment required)",
@@ -343,7 +330,7 @@ def admin_stats():
     paid = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM requests WHERE status = 200")
     success = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM requests WHERE source = 'coingecko'")
+    c.execute("SELECT COUNT(*) FROM requests WHERE source = 'coincap'")
     real = c.fetchone()[0]
     conn.close()
     
