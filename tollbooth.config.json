@@ -1,0 +1,8 @@
+{
+  "price": "$0.002",
+  "payTo": "0x3f1...9915",
+  "network": "base",
+  "mode": "all",
+  "pow": true,
+  "powDifficulty": 18
+}
