@@ -2,8 +2,14 @@
 set -e
 
 python bot.py &
+BOT_PID=$!
 
-sleep 3
+sleep 5
+
+if ! kill -0 $BOT_PID 2>/dev/null; then
+    echo "Ошибка: бот не запустился"
+    exit 1
+fi
 
 PORT=${PORT:-10000}
 agent402-tollbooth \
