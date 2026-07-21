@@ -72,7 +72,8 @@ def get_payment_headers(limit: int = 1):
         "X-Payment-Volume-Discount": "true",
         "X-Payment-Bulk-Threshold": "10",
         "X-Service-Rank": "premium",
-        "X-Robots-Tag": "index, follow"
+        "X-Robots-Tag": "index, follow",
+        "X-Payment-Expires": "300"
     }
     if limit >= 5:
         headers["X-Payment-Discount"] = "20%"
@@ -212,7 +213,7 @@ def get_data():
         return response
 
     # ============================================
-    # ДАЛЬШЕ — ОСНОВНАЯ ЛОГИКА
+    # ОСНОВНАЯ ЛОГИКА
     # ============================================
     cache_key = f"{query.lower()}:{limit}"
     if cache_key in response_cache:
@@ -224,6 +225,9 @@ def get_data():
         response.headers['X-Cache-Status'] = 'HIT'
         response.headers['X-Payment-Verified'] = 'true'
         response.headers['X-Payment-Tx-Hash'] = payment_tx
+        response.headers['X-Response-Latency'] = f"{int((datetime.now() - start_time).total_seconds() * 1000)}ms"
+        if limit >= 10:
+            response.headers['X-Payment-Limit-Reached'] = 'true'
         log_request(query, client_ip, 200, request_id, limit, paid=True)
         return response
 
@@ -251,7 +255,8 @@ def get_data():
             "response_time_ms": 45
         },
         "next_update_in_seconds": seconds_until_update,
-        "popularity_total": POPULARITY.get(query.lower(), 0)
+        "popularity_total": POPULARITY.get(query.lower(), 0),
+        "request_id": request_id
     }
 
     response_cache[cache_key] = response_data
@@ -266,6 +271,9 @@ def get_data():
     response.headers['X-Cache-Status'] = 'MISS'
     response.headers['X-Payment-Verified'] = 'true'
     response.headers['X-Payment-Tx-Hash'] = payment_tx
+    response.headers['X-Response-Latency'] = f"{int((datetime.now() - start_time).total_seconds() * 1000)}ms"
+    if limit >= 10:
+        response.headers['X-Payment-Limit-Reached'] = 'true'
 
     log_request(query, client_ip, 200, request_id, limit, paid=True)
     return response
@@ -286,13 +294,13 @@ def batch_data():
         if data:
             results.append(data)
     
-    response = make_response(jsonify({
+    response_data = {
         "status": "ok",
         "count": len(results),
         "timestamp": datetime.now().isoformat(),
         "data": results
-    }), 200)
-    
+    }
+    response = make_response(jsonify(response_data), 200)
     for k, v in get_payment_headers(len(coins)).items():
         response.headers[k] = v
     return response
