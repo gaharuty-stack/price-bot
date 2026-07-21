@@ -276,10 +276,22 @@ def get_data():
     return response
 
 # ============================================
-# BATCH ЭНДПОИНТ
+# BATCH ЭНДПОИНТ (С ЗАЩИТОЙ)
 # ============================================
 @app.route('/api/batch', methods=['GET'])
 def batch_data():
+    payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
+    paid = bool(payment_tx and len(payment_tx) > 10)
+    
+    if not paid:
+        response = make_response(jsonify({
+            "error": "Payment Required",
+            "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"
+        }), 402)
+        for k, v in get_payment_headers().items():
+            response.headers[k] = v
+        return response
+
     query = request.args.get('q', '')
     if not query:
         return jsonify({"error": "Missing parameter", "message": "Укажите ?q=bitcoin,ethereum,solana"}), 400
@@ -300,13 +312,27 @@ def batch_data():
     response = make_response(jsonify(response_data), 200)
     for k, v in get_payment_headers(len(coins)).items():
         response.headers[k] = v
+    response.headers['X-Payment-Verified'] = 'true'
+    response.headers['X-Payment-Tx-Hash'] = payment_tx
     return response
 
 # ============================================
-# ИСТОРИЯ (НОВЫЙ ЭНДПОИНТ)
+# ИСТОРИЯ (С ЗАЩИТОЙ)
 # ============================================
 @app.route('/api/history', methods=['GET'])
 def get_history():
+    payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
+    paid = bool(payment_tx and len(payment_tx) > 10)
+    
+    if not paid:
+        response = make_response(jsonify({
+            "error": "Payment Required",
+            "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"
+        }), 402)
+        for k, v in get_payment_headers().items():
+            response.headers[k] = v
+        return response
+
     query = request.args.get('q', '').strip()
     days = request.args.get('days', 7, type=int)
     days = min(max(days, 1), 30)
@@ -335,6 +361,8 @@ def get_history():
 
     for k, v in get_payment_headers().items():
         response.headers[k] = v
+    response.headers['X-Payment-Verified'] = 'true'
+    response.headers['X-Payment-Tx-Hash'] = payment_tx
     return response
 
 # ============================================
@@ -345,7 +373,7 @@ def health():
     return jsonify({
         "status": "ok",
         "service": "Price Bot",
-        "version": "2.4",
+        "version": "2.5",
         "uptime": str(datetime.now() - start_time),
         "cache_size": len(response_cache)
     })
@@ -376,7 +404,7 @@ def openapi_spec():
         "openapi": "3.0.0",
         "info": {
             "title": "Premium Crypto Market Data API",
-            "version": "2.4.0",
+            "version": "2.5.0",
             "description": "Real-time prices, historical data, trends, and forecasts for BTC, ETH, SOL, DOGE, ADA, XRP. Payment: 0.001 USDC on Base.",
             "keywords": ["crypto", "prices", "real-time", "forecast", "historical", "market-data"],
             "x402": PAYMENT_CONFIG
@@ -400,7 +428,11 @@ def openapi_spec():
             "/api/batch": {
                 "get": {
                     "summary": "Batch request for multiple coins",
-                    "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}]
+                    "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Batch data returned after payment"},
+                        "402": {"description": "Payment Required"}
+                    }
                 }
             },
             "/api/history": {
@@ -431,7 +463,7 @@ def well_known_x402():
 def root():
     return jsonify({
         "status": "ok",
-        "service": "Price Bot v2.4",
+        "service": "Price Bot v2.5",
         "description": "Premium self-updating cryptocurrency market data API",
         "payment": PAYMENT_CONFIG,
         "supported": list(REAL_PRICES.keys()),
