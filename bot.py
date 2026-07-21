@@ -62,7 +62,8 @@ PAYMENT_CONFIG = {
 
 def get_payment_headers(limit: int = 1):
     headers = {
-        "X-Payment-Required": PAYMENT_CONFIG["amount"],
+        "X-Payment-Required": "true",
+        "X-Payment-Amount": PAYMENT_CONFIG["amount"],
         "X-Payment-Currency": PAYMENT_CONFIG["currency"],
         "X-Payment-Network": PAYMENT_CONFIG["network"],
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
@@ -141,7 +142,6 @@ def get_price_data(query: str, offset: int = 0):
     query_lower = query.lower()
     base_price = REAL_PRICES.get(query_lower, random.uniform(10, 1000))
     
-    # Небольшой сдвиг для разных записей в batch
     offset_noise = offset * 0.001
     price_noise = random.uniform(-0.015, 0.015) + offset_noise
     current_price = round(base_price * (1 + price_noise), 2)
@@ -169,8 +169,15 @@ def get_price_data(query: str, offset: int = 0):
 # ============================================
 # ОСНОВНОЙ ЭНДПОИНТ
 # ============================================
-@app.route('/api/data', methods=['GET'])
+@app.route('/api/data', methods=['GET', 'OPTIONS', 'HEAD'])
 def get_data():
+    # Обработка OPTIONS/HEAD для ScoutGate
+    if request.method in ['OPTIONS', 'HEAD']:
+        response = make_response('', 200)
+        for k, v in get_payment_headers().items():
+            response.headers[k] = v
+        return response
+
     request_id = str(uuid.uuid4())[:8]
     query = request.args.get('q', '').strip()
     client_ip = request.remote_addr
