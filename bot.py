@@ -31,7 +31,7 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS requests
                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
                       query TEXT, timestamp TEXT, ip TEXT,
-                      status INTEGER, request_id TEXT, limit_count INTEGER)''')
+                      status INTEGER, request_id TEXT, limit_count INTEGER, paid BOOLEAN DEFAULT 0)''')
         conn.commit()
         conn.close()
     except Exception as e:
@@ -39,12 +39,12 @@ def init_db():
 
 init_db()
 
-def log_request(query: str, ip: str, status: int, request_id: str = "", limit_count: int = 1):
+def log_request(query: str, ip: str, status: int, request_id: str = "", limit_count: int = 1, paid: bool = False):
     try:
         conn = sqlite3.connect('bot_stats.db')
         c = conn.cursor()
-        c.execute("INSERT INTO requests (query, timestamp, ip, status, request_id, limit_count) VALUES (?, ?, ?, ?, ?, ?)",
-                  (query, datetime.now().isoformat(), ip, status, request_id, limit_count))
+        c.execute("INSERT INTO requests (query, timestamp, ip, status, request_id, limit_count, paid) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (query, datetime.now().isoformat(), ip, status, request_id, limit_count, 1 if paid else 0))
         conn.commit()
         conn.close()
     except Exception:
@@ -191,6 +191,29 @@ def get_data():
     if not re.match(r'^[a-zA-Z0-9\-\_\s,]+$', query):
         return jsonify({"error": "Invalid query"}), 400
 
+    # ============================================
+    # ПРОВЕРКА ПЛАТЕЖА
+    # ============================================
+    payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
+    paid = bool(payment_tx and len(payment_tx) > 10)
+    
+    # Если платёж не подтверждён — возвращаем 402
+    if not paid:
+        response = make_response(jsonify({
+            "error": "Payment Required",
+            "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}",
+            "price": f"{PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']}",
+            "network": PAYMENT_CONFIG['network'],
+            "receiver": PAYMENT_CONFIG['receiver']
+        }), 402)
+        for k, v in get_payment_headers(limit).items():
+            response.headers[k] = v
+        response.headers['X-Request-ID'] = request_id
+        return response
+
+    # ============================================
+    # ДАЛЬШЕ — ОСНОВНАЯ ЛОГИКА
+    # ============================================
     cache_key = f"{query.lower()}:{limit}"
     if cache_key in response_cache:
         response_data = response_cache[cache_key]
@@ -199,6 +222,9 @@ def get_data():
             response.headers[k] = v
         response.headers['X-Request-ID'] = request_id
         response.headers['X-Cache-Status'] = 'HIT'
+        response.headers['X-Payment-Verified'] = 'true'
+        response.headers['X-Payment-Tx-Hash'] = payment_tx
+        log_request(query, client_ip, 200, request_id, limit, paid=True)
         return response
 
     logger.info(f"Запрос: {query} (limit={limit}) от {client_ip} [{request_id}]")
@@ -238,8 +264,10 @@ def get_data():
         response.headers[k] = v
     response.headers['X-Request-ID'] = request_id
     response.headers['X-Cache-Status'] = 'MISS'
+    response.headers['X-Payment-Verified'] = 'true'
+    response.headers['X-Payment-Tx-Hash'] = payment_tx
 
-    log_request(query, client_ip, 200, request_id, limit)
+    log_request(query, client_ip, 200, request_id, limit, paid=True)
     return response
 
 # ============================================
@@ -277,7 +305,7 @@ def health():
     return jsonify({
         "status": "ok",
         "service": "Price Bot",
-        "version": "2.2",
+        "version": "2.3",
         "uptime": str(datetime.now() - start_time),
         "cache_size": len(response_cache)
     })
@@ -308,7 +336,7 @@ def openapi_spec():
         "openapi": "3.0.0",
         "info": {
             "title": "Price Bot API",
-            "version": "2.2.0",
+            "version": "2.3.0",
             "description": "Premium self-updating market data. Payment: 0.001 USDC on Base. Bulk discounts available.",
             "x402": PAYMENT_CONFIG
         },
@@ -322,7 +350,10 @@ def openapi_spec():
                         {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}},
                         {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["pretty"]}}
                     ],
-                    "responses": {"200": {"description": "Price data"}, "402": {"description": "Payment Required"}}
+                    "responses": {
+                        "200": {"description": "Price data returned after payment"},
+                        "402": {"description": "Payment Required"}
+                    }
                 }
             },
             "/api/batch": {
@@ -346,11 +377,11 @@ def well_known_x402():
 def root():
     return jsonify({
         "status": "ok",
-        "service": "Price Bot v2.2",
+        "service": "Price Bot v2.3",
         "description": "Premium self-updating cryptocurrency market data API",
         "payment": PAYMENT_CONFIG,
         "supported": list(REAL_PRICES.keys()),
-        "features": ["bulk_discount", "batch_requests", "real_time", "reliability_score"],
+        "features": ["bulk_discount", "batch_requests", "real_time", "reliability_score", "payment_verification"],
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin&limit=5",
             "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
