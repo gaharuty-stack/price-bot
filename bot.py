@@ -51,10 +51,10 @@ def log_request(query: str, ip: str, status: int, request_id: str = "", limit_co
         pass
 
 # ============================================
-# КОНФИГ ПЛАТЕЖЕЙ (НОВАЯ ЦЕНА)
+# КОНФИГ ПЛАТЕЖЕЙ (ЦЕНА $0.10)
 # ============================================
 PAYMENT_CONFIG = {
-    "amount": "0.50",  # <-- НОВАЯ ЦЕНА (было 0.001)
+    "amount": "0.10",
     "currency": "USDC",
     "network": "base",
     "receiver": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915"
@@ -79,7 +79,7 @@ def get_payment_headers(limit: int = 1):
     }
     if limit >= 5:
         headers["X-Payment-Discount"] = "20%"
-        headers["X-Payment-Price"] = "0.40"
+        headers["X-Payment-Price"] = "0.08"
     return headers
 
 # ============================================
@@ -427,7 +427,7 @@ def openapi_spec():
         "info": {
             "title": "Trading Signals & Market Data API",
             "version": "3.0.0",
-            "description": "Real-time prices + BUY/SELL/HOLD signals + forecasts. Payment: 0.50 USDC on Base.",
+            "description": "Real-time prices + BUY/SELL/HOLD signals + forecasts. Payment: 0.10 USDC on Base.",
             "keywords": ["crypto", "signals", "trading", "forecast", "market-data"],
             "x402": PAYMENT_CONFIG
         },
@@ -443,7 +443,7 @@ def openapi_spec():
                     ],
                     "responses": {
                         "200": {"description": "Price + signal data"},
-                        "402": {"description": "Payment Required (0.50 USDC)"}
+                        "402": {"description": "Payment Required (0.10 USDC)"}
                     }
                 }
             },
