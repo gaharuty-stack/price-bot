@@ -51,10 +51,10 @@ def log_request(query: str, ip: str, status: int, request_id: str = "", limit_co
         pass
 
 # ============================================
-# КОНФИГ ПЛАТЕЖЕЙ
+# КОНФИГ ПЛАТЕЖЕЙ (НОВАЯ ЦЕНА)
 # ============================================
 PAYMENT_CONFIG = {
-    "amount": "0.001",
+    "amount": "0.50",  # <-- НОВАЯ ЦЕНА (было 0.001)
     "currency": "USDC",
     "network": "base",
     "receiver": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915"
@@ -67,7 +67,7 @@ def get_payment_headers(limit: int = 1):
         "X-Payment-Currency": PAYMENT_CONFIG["currency"],
         "X-Payment-Network": PAYMENT_CONFIG["network"],
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
-        "X-Payment-Description": "Premium market data",
+        "X-Payment-Description": "Trading signals & market data",
         "X-Payment-Plan": "pay-as-you-go",
         "X-Payment-Volume-Discount": "true",
         "X-Payment-Bulk-Threshold": "10",
@@ -79,7 +79,7 @@ def get_payment_headers(limit: int = 1):
     }
     if limit >= 5:
         headers["X-Payment-Discount"] = "20%"
-        headers["X-Payment-Price"] = "0.0008"
+        headers["X-Payment-Price"] = "0.40"
     return headers
 
 # ============================================
@@ -103,7 +103,7 @@ def update_prices():
         ids = ",".join(["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple"])
         resp = requests.get(
             f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd",
-            timeout=5, headers={"User-Agent": "PriceBot/2.0"}
+            timeout=5, headers={"User-Agent": "PriceBot/3.0"}
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -130,17 +130,8 @@ threading.Thread(target=price_updater_loop, daemon=True).start()
 update_prices()
 
 # ============================================
-# ГЕНЕРАЦИЯ ДАННЫХ
+# ГЕНЕРАЦИЯ ДАННЫХ С СИГНАЛАМИ
 # ============================================
-POPULARITY = {
-    "bitcoin": 1523, "btc": 1523,
-    "ethereum": 1187, "eth": 1187,
-    "solana": 834, "sol": 834,
-    "dogecoin": 456, "doge": 456,
-    "cardano": 312, "ada": 312,
-    "ripple": 289, "xrp": 289
-}
-
 def get_price_data(query: str, offset: int = 0):
     query_lower = query.lower()
     base_price = REAL_PRICES.get(query_lower, random.uniform(10, 1000))
@@ -148,7 +139,38 @@ def get_price_data(query: str, offset: int = 0):
     offset_noise = offset * 0.001
     price_noise = random.uniform(-0.015, 0.015) + offset_noise
     current_price = round(base_price * (1 + price_noise), 2)
+    
     change_24h = round(random.uniform(-2.5, 2.5), 2)
+    
+    # ============================================
+    # СИГНАЛ (покупать/продавать/держать)
+    # ============================================
+    if change_24h > 1.5:
+        signal = "BUY"
+        confidence = round(random.uniform(70, 90), 1)
+        target_price = round(current_price * 1.03, 2)
+        stop_loss = round(current_price * 0.98, 2)
+    elif change_24h < -1.5:
+        signal = "SELL"
+        confidence = round(random.uniform(70, 90), 1)
+        target_price = round(current_price * 0.97, 2)
+        stop_loss = round(current_price * 1.02, 2)
+    else:
+        signal = "HOLD"
+        confidence = round(random.uniform(50, 70), 1)
+        target_price = current_price
+        stop_loss = current_price
+    
+    # ============================================
+    # ПРОГНОЗЫ
+    # ============================================
+    forecast_1d = round(current_price * (1 + random.uniform(-0.02, 0.02)), 2)
+    forecast_3d = round(current_price * (1 + random.uniform(-0.04, 0.04)), 2)
+    forecast_7d = round(current_price * (1 + random.uniform(-0.06, 0.06)), 2)
+    
+    # ============================================
+    # ОСТАЛЬНЫЕ ДАННЫЕ
+    # ============================================
     high_24h = round(current_price * (1 + random.uniform(0.01, 0.025)), 2)
     low_24h = round(current_price * (1 - random.uniform(0.01, 0.025)), 2)
     volume = round(random.uniform(500000000, 50000000000), 2)
@@ -158,18 +180,19 @@ def get_price_data(query: str, offset: int = 0):
         "name": query.title(),
         "price_usd": current_price,
         "change_24h_percent": change_24h,
+        "signal": signal,
+        "confidence": confidence,
+        "target_price": target_price,
+        "stop_loss": stop_loss,
+        "forecast_1d": forecast_1d,
+        "forecast_3d": forecast_3d,
+        "forecast_7d": forecast_7d,
         "high_24h": high_24h,
         "low_24h": low_24h,
         "volume_24h": volume,
-        "price_7d_ago": round(current_price * (1 + random.uniform(-0.05, 0.05)), 2),
-        "price_30d_ago": round(current_price * (1 + random.uniform(-0.1, 0.1)), 2),
-        "forecast": round(current_price * (1 + random.uniform(-0.02, 0.02)), 2),
-        "market_status": "Bullish" if change_24h > 1 else "Bearish" if change_24h < -1 else "Neutral",
-        "trend": "Up" if change_24h > 0.5 else "Down" if change_24h < -0.5 else "Stable",
-        "source": "market-data-api.com (live)",
+        "source": "market-data-api.com (signals)",
         "timestamp": datetime.now().isoformat(),
-        "is_real": True,
-        "popularity": POPULARITY.get(query_lower, 0)
+        "is_real": True
     }
 
 # ============================================
@@ -252,7 +275,6 @@ def get_data():
             "response_time_ms": 45
         },
         "next_update_in_seconds": seconds_until_update,
-        "popularity_total": POPULARITY.get(query.lower(), 0),
         "request_id": request_id
     }
 
@@ -276,7 +298,7 @@ def get_data():
     return response
 
 # ============================================
-# BATCH ЭНДПОИНТ (С ЗАЩИТОЙ)
+# BATCH ЭНДПОИНТ
 # ============================================
 @app.route('/api/batch', methods=['GET'])
 def batch_data():
@@ -317,7 +339,7 @@ def batch_data():
     return response
 
 # ============================================
-# ИСТОРИЯ (С ЗАЩИТОЙ)
+# ИСТОРИЯ
 # ============================================
 @app.route('/api/history', methods=['GET'])
 def get_history():
@@ -373,7 +395,7 @@ def health():
     return jsonify({
         "status": "ok",
         "service": "Price Bot",
-        "version": "2.5",
+        "version": "3.0",
         "uptime": str(datetime.now() - start_time),
         "cache_size": len(response_cache)
     })
@@ -403,49 +425,41 @@ def openapi_spec():
     spec = {
         "openapi": "3.0.0",
         "info": {
-            "title": "Premium Crypto Market Data API",
-            "version": "2.5.0",
-            "description": "Real-time prices, historical data, trends, and forecasts for BTC, ETH, SOL, DOGE, ADA, XRP. Payment: 0.001 USDC on Base.",
-            "keywords": ["crypto", "prices", "real-time", "forecast", "historical", "market-data"],
+            "title": "Trading Signals & Market Data API",
+            "version": "3.0.0",
+            "description": "Real-time prices + BUY/SELL/HOLD signals + forecasts. Payment: 0.50 USDC on Base.",
+            "keywords": ["crypto", "signals", "trading", "forecast", "market-data"],
             "x402": PAYMENT_CONFIG
         },
         "servers": [{"url": "https://price-bot-6erv.onrender.com"}],
         "paths": {
             "/api/data": {
                 "get": {
-                    "summary": "Get current market data",
+                    "summary": "Get price + trading signal",
                     "parameters": [
                         {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
                         {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}},
                         {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["pretty"]}}
                     ],
                     "responses": {
-                        "200": {"description": "Price data returned after payment"},
-                        "402": {"description": "Payment Required"}
+                        "200": {"description": "Price + signal data"},
+                        "402": {"description": "Payment Required (0.50 USDC)"}
                     }
                 }
             },
             "/api/batch": {
                 "get": {
-                    "summary": "Batch request for multiple coins",
-                    "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}],
-                    "responses": {
-                        "200": {"description": "Batch data returned after payment"},
-                        "402": {"description": "Payment Required"}
-                    }
+                    "summary": "Batch signals for multiple coins",
+                    "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}]
                 }
             },
             "/api/history": {
                 "get": {
-                    "summary": "Get historical price data",
+                    "summary": "Historical prices",
                     "parameters": [
                         {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
                         {"name": "days", "in": "query", "schema": {"type": "integer", "default": 7, "maximum": 30}}
-                    ],
-                    "responses": {
-                        "200": {"description": "Historical data returned after payment"},
-                        "402": {"description": "Payment Required"}
-                    }
+                    ]
                 }
             }
         }
@@ -463,11 +477,11 @@ def well_known_x402():
 def root():
     return jsonify({
         "status": "ok",
-        "service": "Price Bot v2.5",
-        "description": "Premium self-updating cryptocurrency market data API",
+        "service": "Price Bot v3.0",
+        "description": "Trading signals + market data API",
         "payment": PAYMENT_CONFIG,
         "supported": list(REAL_PRICES.keys()),
-        "features": ["bulk_discount", "batch_requests", "real_time", "reliability_score", "payment_verification", "historical_data", "forecast"],
+        "features": ["trading_signals", "price_forecasts", "batch_requests", "historical_data"],
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin&limit=5",
             "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
