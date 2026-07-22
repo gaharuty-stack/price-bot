@@ -306,7 +306,7 @@ def get_data():
             "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}",
             "price": f"{PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']}",
             "network": PAYMENT_CONFIG['network'],
-            "receiver": PAYMENT_CONFIG['receiver']",
+            "receiver": PAYMENT_CONFIG['receiver'],
             "subscription": {
                 "available": True,
                 "price": f"${PAYMENT_CONFIG['subscription_price']}/month",
