@@ -85,7 +85,8 @@ PAYMENT_CONFIG = {
     "network": "base",
     "receiver": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915",
     "subscription_price": "5.00",
-    "hot_price": "0.50"
+    "hot_price": "0.50",
+    "trial_days": 7
 }
 
 def get_payment_headers(limit: int = 1):
@@ -134,7 +135,7 @@ def update_prices():
         ids = ",".join(["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple"])
         resp = requests.get(
             f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd",
-            timeout=5, headers={"User-Agent": "PriceBot/5.0"}
+            timeout=5, headers={"User-Agent": "PriceBot/6.0"}
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -161,7 +162,7 @@ threading.Thread(target=price_updater_loop, daemon=True).start()
 update_prices()
 
 # ============================================
-# ГЕНЕРАЦИЯ ДАННЫХ (С HOT СИГНАЛАМИ И UPSELL)
+# ГЕНЕРАЦИЯ ДАННЫХ
 # ============================================
 def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     query_lower = query.lower()
@@ -193,7 +194,7 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         stop_loss = current_price
     
     # ============================================
-    # ГОРЯЧИЙ СИГНАЛ (10-15% вероятность)
+    # ГОРЯЧИЙ СИГНАЛ
     # ============================================
     is_hot = random.random() < 0.15
     hot_confidence = round(random.uniform(90, 98), 1) if is_hot else None
@@ -252,9 +253,6 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         "is_real": True
     }
     
-    # ============================================
-    # ДОБАВЛЯЕМ HOT, ЕСЛИ ЕСТЬ
-    # ============================================
     if is_hot:
         result["hot"] = True
         result["hot_confidence"] = hot_confidence
@@ -264,7 +262,7 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     return result
 
 # ============================================
-# ОСНОВНОЙ ЭНДПОИНТ
+# ОСНОВНОЙ ЭНДПОИНТ (С ТРИАЛОМ)
 # ============================================
 @app.route('/api/data', methods=['GET', 'OPTIONS', 'HEAD'])
 def get_data():
@@ -287,12 +285,16 @@ def get_data():
     if not re.match(r'^[a-zA-Z0-9\-\_\s,]+$', query):
         return jsonify({"error": "Invalid query"}), 400
 
-    # Проверка подписки
+    # ============================================
+    # ПРОВЕРКА ПОДПИСКИ (ВКЛЮЧАЯ ТРИАЛ)
+    # ============================================
     if is_subscriber(client_ip):
         logger.info(f"Подписчик {client_ip} — доступ бесплатный")
         return _generate_response(query, limit, pretty, client_ip, request_id, is_subscriber=True)
 
-    # Freemium
+    # ============================================
+    # FREEMIUM (1 БЕСПЛАТНЫЙ ЗАПРОС)
+    # ============================================
     free_trial_key = f"trial_{client_ip}_{datetime.now().date()}"
     if free_trial_key not in response_cache:
         logger.info(f"Бесплатный пробник для {client_ip}")
@@ -306,7 +308,9 @@ def get_data():
             return data, status, headers
         return response
 
-    # Проверка платежа
+    # ============================================
+    # ПРОВЕРКА ПЛАТЕЖА
+    # ============================================
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
     paid = bool(payment_tx and len(payment_tx) > 10)
     
@@ -320,6 +324,11 @@ def get_data():
             "subscription": {
                 "available": True,
                 "price": f"${PAYMENT_CONFIG['subscription_price']}/month",
+                "trial": {
+                    "available": True,
+                    "days": PAYMENT_CONFIG['trial_days'],
+                    "endpoint": "/api/subscribe?trial=true"
+                },
                 "endpoint": "/api/subscribe"
             }
         }), 402)
@@ -357,19 +366,19 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
         result = get_price_data(query, offset=i, is_trial=is_trial)
         results.append(result)
     
-    # ============================================
-    # АНАЛИЗИРУЕМ, ЕСТЬ ЛИ ГОРЯЧИЕ СИГНАЛЫ
-    # ============================================
     has_hot = any(r.get('hot', False) for r in results)
     
-    # ============================================
-    # UPSELL
-    # ============================================
     upsell = {
         "bundle_10": "10 signals for $0.70 (save 30%)",
         "bundle_50": "50 signals for $3.00 (save 40%)",
         "daily_pass": "unlimited for 24h — $2.00",
-        "subscribe": f"${PAYMENT_CONFIG['subscription_price']}/month — unlimited"
+        "subscribe": f"${PAYMENT_CONFIG['subscription_price']}/month — unlimited",
+        "trial": {
+            "available": True,
+            "days": PAYMENT_CONFIG['trial_days'],
+            "price_after": f"${PAYMENT_CONFIG['subscription_price']}/month",
+            "endpoint": "/api/subscribe?trial=true"
+        }
     }
     if has_hot:
         upsell["hot_signal"] = f"Premium signal with 90%+ confidence — ${PAYMENT_CONFIG['hot_price']}"
@@ -401,7 +410,12 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
             "subscription": {
                 "available": True,
                 "price": f"${PAYMENT_CONFIG['subscription_price']}/month",
-                "unlimited": True
+                "unlimited": True,
+                "trial": {
+                    "available": True,
+                    "days": PAYMENT_CONFIG['trial_days'],
+                    "endpoint": "/api/subscribe?trial=true"
+                }
             }
         },
         "upsell": upsell
@@ -431,10 +445,25 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
     return response
 
 # ============================================
-# ПОДПИСКА
+# ПОДПИСКА (С ТРИАЛОМ)
 # ============================================
 @app.route('/api/subscribe', methods=['GET', 'POST'])
 def subscribe():
+    trial = request.args.get('trial', '').lower() == 'true'
+    client_ip = request.remote_addr
+    
+    if trial:
+        # Активируем бесплатный триал на 7 дней
+        if add_subscriber(client_ip, PAYMENT_CONFIG['trial_days']):
+            return jsonify({
+                "status": "ok",
+                "message": f"{PAYMENT_CONFIG['trial_days']}-day free trial activated",
+                "expires_at": (datetime.now() + timedelta(days=PAYMENT_CONFIG['trial_days'])).isoformat(),
+                "price_after_trial": f"${PAYMENT_CONFIG['subscription_price']}/month"
+            })
+        return jsonify({"error": "Failed to activate trial"}), 500
+    
+    # Обычная платная подписка
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
     paid = bool(payment_tx and len(payment_tx) > 10)
     
@@ -445,13 +474,17 @@ def subscribe():
             "price": f"{PAYMENT_CONFIG['subscription_price']} {PAYMENT_CONFIG['currency']}",
             "network": PAYMENT_CONFIG['network'],
             "receiver": PAYMENT_CONFIG['receiver'],
-            "subscription_days": 30
+            "subscription_days": 30,
+            "trial": {
+                "available": True,
+                "days": PAYMENT_CONFIG['trial_days'],
+                "endpoint": "/api/subscribe?trial=true"
+            }
         }), 402)
         for k, v in get_payment_headers().items():
             response.headers[k] = v
         return response
 
-    client_ip = request.remote_addr
     if add_subscriber(client_ip, 30):
         return jsonify({
             "status": "ok",
@@ -461,7 +494,7 @@ def subscribe():
     return jsonify({"error": "Failed to activate subscription"}), 500
 
 # ============================================
-# BATCH + ИСТОРИЯ + ДОПОЛНИТЕЛЬНЫЕ ЭНДПОИНТЫ
+# ОСТАЛЬНЫЕ ЭНДПОИНТЫ
 # ============================================
 @app.route('/api/batch', methods=['GET'])
 def batch_data():
@@ -560,7 +593,7 @@ def health():
     return jsonify({
         "status": "ok",
         "service": "Price Bot",
-        "version": "5.0",
+        "version": "6.0",
         "uptime": str(datetime.now() - start_time),
         "cache_size": len(response_cache)
     })
@@ -591,9 +624,9 @@ def openapi_spec():
         "openapi": "3.0.0",
         "info": {
             "title": "Trading Signals & Market Data API",
-            "version": "5.0.0",
-            "description": "Real-time prices + BUY/SELL/HOLD signals + hot signals (90%+ confidence) + proof of performance. Payment: 0.10 USDC on Base.",
-            "keywords": ["crypto", "signals", "trading", "forecast", "market-data", "proof", "hot-signals"],
+            "version": "6.0.0",
+            "description": f"Real-time prices + BUY/SELL/HOLD signals + hot signals + proof of performance. Payment: 0.10 USDC on Base. {PAYMENT_CONFIG['trial_days']}-day free trial available.",
+            "keywords": ["crypto", "signals", "trading", "forecast", "market-data", "proof", "hot-signals", "trial"],
             "x402": PAYMENT_CONFIG
         },
         "servers": [{"url": "https://price-bot-6erv.onrender.com"}],
@@ -614,7 +647,10 @@ def openapi_spec():
             },
             "/api/subscribe": {
                 "get": {
-                    "summary": "Subscribe for 30-day unlimited access ($5.00)",
+                    "summary": "Subscribe for 30-day unlimited access ($5.00) or 7-day free trial",
+                    "parameters": [
+                        {"name": "trial", "in": "query", "schema": {"type": "boolean"}}
+                    ],
                     "responses": {
                         "200": {"description": "Subscription activated"},
                         "402": {"description": "Payment Required ($5.00 USDC)"}
@@ -651,8 +687,8 @@ def well_known_x402():
 def root():
     return jsonify({
         "status": "ok",
-        "service": "Price Bot v5.0",
-        "description": "Trading signals + market data + proof + hot signals + upsell",
+        "service": "Price Bot v6.0",
+        "description": f"Trading signals + market data + proof + hot signals + upsell + {PAYMENT_CONFIG['trial_days']}-day free trial",
         "payment": PAYMENT_CONFIG,
         "supported": list(REAL_PRICES.keys()),
         "features": [
@@ -668,7 +704,7 @@ def root():
         ],
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin&limit=5",
-            "/api/subscribe": "GET with payment for $5/month",
+            "/api/subscribe": "GET with ?trial=true for free trial",
             "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
             "/api/history": "GET with ?q=bitcoin&days=7",
             "/openapi.json": "OpenAPI spec",
