@@ -19,7 +19,7 @@ import json
 # ============================================
 # INTEGRITY (ПОДПИСЬ ОТВЕТОВ)
 # ============================================
-SECRET_KEY = "PriceBot_Secure_Key_2026_ChangeMe"  # Замени на свой ключ
+SECRET_KEY = "TradingBot_SecureKey_2026_9x7k3m"  # Замени на свой ключ
 
 def sign_data(data: dict) -> str:
     """Подписывает данные с помощью HMAC-SHA256"""
