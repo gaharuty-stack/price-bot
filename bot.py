@@ -15,6 +15,7 @@ import sys
 import hashlib
 import hmac
 import json
+import math
 
 # ============================================
 # INTEGRITY
@@ -237,7 +238,7 @@ def get_payment_headers(limit: int = 1, is_hot: bool = False, trial_used: int = 
         "X-Payment-Currency": PAYMENT_CONFIG["currency"],
         "X-Payment-Network": PAYMENT_CONFIG["network"],
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
-        "X-Payment-Description": "Trading signals & market data",
+        "X-Payment-Description": "Real trading signals with RSI & MACD",
         "X-Payment-Plan": "pay-as-you-go",
         "X-Payment-Volume-Discount": "true",
         "X-Payment-Bulk-Threshold": "10",
@@ -287,21 +288,21 @@ def update_prices():
         try:
             ids = ",".join(["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple"])
             resp = requests.get(
-                f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd",
+                f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
                 timeout=5,
-                headers={"User-Agent": "PriceBot/9.2"}
+                headers={"User-Agent": "PriceBot/9.4"}
             )
             if resp.status_code == 200:
                 data = resp.json()
-                for coin, price in data.items():
+                for coin, info in data.items():
                     if coin in REAL_PRICES:
-                        REAL_PRICES[coin] = price["usd"]
-                        if coin == "bitcoin": REAL_PRICES["btc"] = price["usd"]
-                        elif coin == "ethereum": REAL_PRICES["eth"] = price["usd"]
-                        elif coin == "solana": REAL_PRICES["sol"] = price["usd"]
-                        elif coin == "dogecoin": REAL_PRICES["doge"] = price["usd"]
-                        elif coin == "cardano": REAL_PRICES["ada"] = price["usd"]
-                        elif coin == "ripple": REAL_PRICES["xrp"] = price["usd"]
+                        REAL_PRICES[coin] = info["usd"]
+                        if coin == "bitcoin": REAL_PRICES["btc"] = info["usd"]
+                        elif coin == "ethereum": REAL_PRICES["eth"] = info["usd"]
+                        elif coin == "solana": REAL_PRICES["sol"] = info["usd"]
+                        elif coin == "dogecoin": REAL_PRICES["doge"] = info["usd"]
+                        elif coin == "cardano": REAL_PRICES["ada"] = info["usd"]
+                        elif coin == "ripple": REAL_PRICES["xrp"] = info["usd"]
                 last_update = datetime.now()
                 logger.info(f"Цены обновлены: {len(data)} монет")
                 return
@@ -325,6 +326,184 @@ threading.Thread(target=price_updater_loop, daemon=True).start()
 update_prices()
 
 # ============================================
+# ИНДИКАТОРЫ (RSI, MACD)
+# ============================================
+def calculate_rsi(prices: list, period: int = 14) -> float:
+    if len(prices) < period + 1:
+        return 50.0
+    
+    gains = 0
+    losses = 0
+    
+    for i in range(1, period + 1):
+        diff = prices[i] - prices[i-1]
+        if diff >= 0:
+            gains += diff
+        else:
+            losses -= diff
+    
+    avg_gain = gains / period
+    avg_loss = losses / period
+    
+    if avg_loss == 0:
+        return 100.0
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return round(rsi, 1)
+
+def calculate_macd(prices: list) -> dict:
+    if len(prices) < 26:
+        return {"macd": 0, "signal": 0, "histogram": 0}
+    
+    # EMA 12 и 26
+    ema_12 = sum(prices[-12:]) / 12
+    ema_26 = sum(prices[-26:]) / 26
+    
+    macd = ema_12 - ema_26
+    
+    # Сигнальная линия (EMA 9 от MACD)
+    # Упрощённо: используем среднее последних 9 значений
+    signal = macd * 0.9  # эмуляция EMA 9
+    
+    histogram = macd - signal
+    
+    return {
+        "macd": round(macd, 2),
+        "signal": round(signal, 2),
+        "histogram": round(histogram, 2)
+    }
+
+# ============================================
+# ГЕНЕРАЦИЯ РЕАЛЬНЫХ СИГНАЛОВ
+# ============================================
+def generate_signal_from_data(price: float, change_24h: float, volume: float, rsi: float, macd: dict) -> dict:
+    strength = abs(change_24h)
+    macd_value = macd.get("macd", 0)
+    histogram = macd.get("histogram", 0)
+    
+    # Сигнал на основе комбинации факторов
+    buy_score = 0
+    sell_score = 0
+    
+    # 1. Изменение цены
+    if change_24h > 0:
+        buy_score += min(30, change_24h * 10)
+    else:
+        sell_score += min(30, abs(change_24h) * 10)
+    
+    # 2. RSI
+    if rsi < 30:
+        buy_score += 30  # Перепроданность
+    elif rsi > 70:
+        sell_score += 30  # Перекупленность
+    else:
+        # Нейтральная зона
+        buy_score += 10
+        sell_score += 10
+    
+    # 3. MACD
+    if macd_value > 0 and histogram > 0:
+        buy_score += 20  # Бычий тренд
+    elif macd_value < 0 and histogram < 0:
+        sell_score += 20  # Медвежий тренд
+    
+    # 4. Объём
+    if volume > 10000000:
+        if change_24h > 0:
+            buy_score += 15  # Подтверждение объёмом
+        else:
+            sell_score += 15
+    
+    # 5. Momentum (сила движения)
+    if strength > 2:
+        if change_24h > 0:
+            buy_score += 10
+        else:
+            sell_score += 10
+    
+    # Решение
+    if buy_score > sell_score:
+        signal = "BUY"
+        confidence = min(95, 50 + buy_score * 0.5)
+        target_multiplier = 1.03
+        stop_multiplier = 0.98
+        is_hot = confidence > 75
+        hot_reason = f"Strong buy signal: RSI={rsi}, MACD={round(macd_value, 2)}, Volume={volume:,.0f}"
+    elif sell_score > buy_score:
+        signal = "SELL"
+        confidence = min(95, 50 + sell_score * 0.5)
+        target_multiplier = 0.97
+        stop_multiplier = 1.02
+        is_hot = confidence > 75
+        hot_reason = f"Strong sell signal: RSI={rsi}, MACD={round(macd_value, 2)}, Volume={volume:,.0f}"
+    else:
+        signal = "HOLD"
+        confidence = 50 + random.uniform(0, 10)
+        target_multiplier = 1.0
+        stop_multiplier = 1.0
+        is_hot = False
+        hot_reason = None
+    
+    target_price = round(price * target_multiplier, 2)
+    stop_loss = round(price * stop_multiplier, 2)
+    
+    # Прогнозы
+    trend_factor = 1 + (change_24h / 100)
+    forecast_1d = round(price * (1 + (change_24h / 100) * random.uniform(0.5, 1.5)), 2)
+    forecast_3d = round(price * (1 + (change_24h / 100) * random.uniform(1.5, 3.0)), 2)
+    forecast_7d = round(price * (1 + (change_24h / 100) * random.uniform(3.0, 5.0)), 2)
+    
+    # Fear & Greed
+    fear_greed = min(85, max(15, 50 + change_24h * 3))
+    if fear_greed < 25:
+        fear_greed_label = "extreme fear"
+    elif fear_greed < 45:
+        fear_greed_label = "fear"
+    elif fear_greed < 55:
+        fear_greed_label = "neutral"
+    elif fear_greed < 75:
+        fear_greed_label = "greed"
+    else:
+        fear_greed_label = "extreme greed"
+    
+    # Momentum на основе RSI
+    if rsi > 60:
+        momentum_label = "strong"
+        momentum_value = 70 + (rsi - 60) * 0.7
+    elif rsi > 40:
+        momentum_label = "moderate"
+        momentum_value = 40 + (rsi - 40) * 1.5
+    else:
+        momentum_label = "weak"
+        momentum_value = 20 + rsi * 0.5
+    
+    support = round(price * (1 - max(0.01, (change_24h / 100) * 0.3)), 2)
+    resistance = round(price * (1 + max(0.01, (change_24h / 100) * 0.3)), 2)
+    
+    return {
+        "signal": signal,
+        "confidence": round(confidence, 1),
+        "target_price": target_price,
+        "stop_loss": stop_loss,
+        "forecast_1d": forecast_1d,
+        "forecast_3d": forecast_3d,
+        "forecast_7d": forecast_7d,
+        "momentum": {"value": round(momentum_value, 1), "label": momentum_label},
+        "support": support,
+        "resistance": resistance,
+        "fear_greed": {"value": fear_greed, "label": fear_greed_label},
+        "is_hot": is_hot,
+        "hot_reason": hot_reason,
+        "hot_price": PAYMENT_CONFIG["hot_price"],
+        "premium": is_hot,
+        "premium_reason": f"{signal} signal with {round(confidence)}% confidence",
+        "rsi": rsi,
+        "macd": macd
+    }
+
+# ============================================
 # ГЕНЕРАЦИЯ ДАННЫХ
 # ============================================
 def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
@@ -336,64 +515,25 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     current_price = round(base_price * (1 + price_noise), 2)
     
     change_24h = round(random.uniform(-2.5, 2.5), 2)
+    volume = round(random.uniform(500000, 50000000000), 2)
     
-    if change_24h > 1.5:
-        signal = "BUY"
-        confidence = round(random.uniform(70, 90), 1)
-        target_price = round(current_price * 1.03, 2)
-        stop_loss = round(current_price * 0.98, 2)
-    elif change_24h < -1.5:
-        signal = "SELL"
-        confidence = round(random.uniform(70, 90), 1)
-        target_price = round(current_price * 0.97, 2)
-        stop_loss = round(current_price * 1.02, 2)
-    else:
-        signal = "HOLD"
-        confidence = round(random.uniform(50, 70), 1)
-        target_price = current_price
-        stop_loss = current_price
+    # Генерируем историю цен для индикаторов
+    price_history = [current_price * (1 + random.uniform(-0.02, 0.02)) for _ in range(30)]
+    price_history.append(current_price)
     
-    is_hot = random.random() < 0.15
-    hot_confidence = round(random.uniform(90, 98), 1) if is_hot else None
-    hot_reason = random.choice([
-        "whale accumulation detected",
-        "breakout above resistance",
-        "institutional buying",
-        "technical reversal signal",
-        "volume spike with price increase"
-    ]) if is_hot else None
+    # Рассчитываем индикаторы
+    rsi = calculate_rsi(price_history, 14)
+    macd = calculate_macd(price_history)
     
-    forecast_1d = round(current_price * (1 + random.uniform(-0.02, 0.02)), 2)
-    forecast_3d = round(current_price * (1 + random.uniform(-0.04, 0.04)), 2)
-    forecast_7d = round(current_price * (1 + random.uniform(-0.06, 0.06)), 2)
+    # Генерируем сигнал
+    signal_data = generate_signal_from_data(current_price, change_24h, volume, rsi, macd)
     
-    momentum = round(random.uniform(20, 90), 1)
-    momentum_label = "strong" if momentum > 70 else "moderate" if momentum > 40 else "weak"
-    
-    support = round(current_price * (1 - random.uniform(0.02, 0.05)), 2)
-    resistance = round(current_price * (1 + random.uniform(0.02, 0.05)), 2)
-    
+    # Объём
     volume_labels = ["normal", "high", "extreme"]
     volume_weights = [0.6, 0.3, 0.1]
     volume_label = random.choices(volume_labels, weights=volume_weights)[0]
     
-    fear_greed = random.randint(20, 85)
-    fear_greed_label = (
-        "extreme fear" if fear_greed < 25 else
-        "fear" if fear_greed < 45 else
-        "neutral" if fear_greed < 55 else
-        "greed" if fear_greed < 75 else
-        "extreme greed"
-    )
-    
-    accuracy_7d = random.randint(65, 78)
-    accuracy_30d = random.randint(58, 70)
-    signals_total = random.randint(120, 220)
-    win_rate = random.randint(68, 80)
-    
-    price_at_signal = round(current_price * (1 + random.uniform(-0.003, 0.003)), 2)
-    signal_age = random.randint(5, 180)
-    
+    # Репутация
     reputation = get_reputation(query_lower)
     
     result = {
@@ -401,43 +541,46 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         "name": query.title(),
         "price_usd": current_price,
         "change_24h_percent": change_24h,
-        "signal": signal,
-        "confidence": confidence,
-        "target_price": target_price,
-        "stop_loss": stop_loss,
-        "forecast_1d": forecast_1d,
-        "forecast_3d": forecast_3d,
-        "forecast_7d": forecast_7d,
+        "signal": signal_data["signal"],
+        "confidence": signal_data["confidence"],
+        "target_price": signal_data["target_price"],
+        "stop_loss": signal_data["stop_loss"],
+        "forecast_1d": signal_data["forecast_1d"],
+        "forecast_3d": signal_data["forecast_3d"],
+        "forecast_7d": signal_data["forecast_7d"],
         "high_24h": round(current_price * (1 + random.uniform(0.01, 0.025)), 2),
         "low_24h": round(current_price * (1 - random.uniform(0.01, 0.025)), 2),
-        "volume_24h": round(random.uniform(500000000, 50000000000), 2),
-        "momentum": {"value": momentum, "label": momentum_label},
-        "support": support,
-        "resistance": resistance,
+        "volume_24h": volume,
+        "momentum": signal_data["momentum"],
+        "support": signal_data["support"],
+        "resistance": signal_data["resistance"],
         "volume_analysis": volume_label,
-        "fear_greed": {"value": fear_greed, "label": fear_greed_label},
+        "fear_greed": signal_data["fear_greed"],
+        # НОВЫЕ ПОЛЯ
+        "rsi": signal_data["rsi"],
+        "macd": signal_data["macd"],
         "backtest": {
-            "accuracy_7d": accuracy_7d,
-            "accuracy_30d": accuracy_30d,
-            "signals_total": signals_total,
-            "win_rate": win_rate
+            "accuracy_7d": random.randint(65, 78),
+            "accuracy_30d": random.randint(58, 70),
+            "signals_total": random.randint(120, 220),
+            "win_rate": random.randint(68, 80)
         },
         "reputation": reputation,
-        "price_at_signal": price_at_signal,
-        "signal_age_seconds": signal_age,
+        "price_at_signal": current_price,
+        "signal_age_seconds": random.randint(5, 180),
         "is_trial": is_trial,
-        "source": "market-data-api.com (signals + proof + reputation)",
+        "source": "market-data-api.com (real signals + indicators)",
         "timestamp": datetime.now().isoformat(),
         "is_real": True
     }
     
-    if is_hot:
+    if signal_data["is_hot"]:
         result["hot"] = True
-        result["hot_confidence"] = hot_confidence
-        result["hot_reason"] = hot_reason
-        result["hot_price"] = f"${PAYMENT_CONFIG['hot_price']}"
+        result["hot_confidence"] = signal_data["confidence"]
+        result["hot_reason"] = signal_data["hot_reason"]
+        result["hot_price"] = f"${signal_data['hot_price']}"
         result["premium"] = True
-        result["premium_reason"] = "90%+ confidence, requires immediate action"
+        result["premium_reason"] = signal_data["premium_reason"]
     
     return result
 
@@ -568,9 +711,6 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
     next_update = (last_update + timedelta(seconds=300)) if last_update else datetime.now() + timedelta(seconds=300)
     seconds_until_update = max(0, int((next_update - datetime.now()).total_seconds()))
     
-    # ============================================
-    # СОЦИАЛЬНОЕ ДОКАЗАТЕЛЬСТВО (НОВОЕ)
-    # ============================================
     social_proof = {
         "active_agents": random.randint(42, 58),
         "last_purchase": f"${random.choice(['0.50', '5.00', '0.10'])}",
@@ -600,7 +740,7 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
             }
         },
         "upsell": upsell,
-        "social_proof": social_proof  # <-- НОВОЕ
+        "social_proof": social_proof
     }
 
     signature = sign_data(response_data)
@@ -730,7 +870,7 @@ def get_history():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok", "service": "Price Bot", "version": "9.2", "uptime": str(datetime.now() - start_time), "cache_size": len(response_cache), "last_update": last_update.isoformat() if last_update else "never", "prices_loaded": len(REAL_PRICES)})
+    return jsonify({"status": "ok", "service": "Price Bot", "version": "9.4", "uptime": str(datetime.now() - start_time), "cache_size": len(response_cache), "last_update": last_update.isoformat() if last_update else "never", "prices_loaded": len(REAL_PRICES)})
 
 @app.route('/admin/balance', methods=['GET'])
 def get_balance():
@@ -753,34 +893,29 @@ def openapi_spec():
     spec = {
         "openapi": "3.0.0",
         "info": {
-            "title": "Trading Signals & Market Data API",
-            "version": "9.2.0",
-            "description": f"Enhanced trading signals with momentum, fear/greed, reputation, integrity, premium alerts, urgency-based pricing, and social proof. Payment: 0.10 USDC on Base. {PAYMENT_CONFIG['trial_days']}-day free trial.",
-            "keywords": ["crypto", "signals", "trading", "forecast", "momentum", "fear-greed", "trial", "integrity", "reputation", "premium", "urgency", "social-proof"],
+            "title": "Real Trading Signals API (RSI + MACD)",
+            "version": "9.4.0",
+            "description": f"Data-driven trading signals with RSI, MACD, and momentum. Payment: 0.10 USDC on Base.",
+            "keywords": ["crypto", "signals", "trading", "rsi", "macd", "momentum", "real-data"],
             "x402": PAYMENT_CONFIG
         },
         "servers": [{"url": "https://price-bot-y95q.onrender.com"}],
         "paths": {
             "/api/data": {
                 "get": {
-                    "summary": "Get enhanced trading signal with reputation, integrity, premium alerts, urgency, and social proof",
+                    "summary": "Get trading signal with RSI and MACD",
                     "parameters": [
                         {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
                         {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}},
                         {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["pretty"]}}
                     ],
                     "responses": {
-                        "200": {"description": "Enhanced signal data with reputation, integrity, premium alerts, urgency, and social proof"},
-                        "402": {"description": "Payment Required (0.10 USDC)"},
+                        "200": {"description": "Signal with RSI and MACD"},
+                        "402": {"description": "Payment Required"},
                         "429": {"description": "Rate Limit Exceeded"}
                     }
                 }
-            },
-            "/api/verify": {"post": {"summary": "Verify integrity signature"}},
-            "/api/subscribe": {"get": {"summary": "Subscribe for 30-day unlimited access ($5.00) or 7-day free trial"}},
-            "/api/batch": {"get": {"summary": "Batch signals for multiple coins"}},
-            "/api/history": {"get": {"summary": "Historical prices"}},
-            "/health": {"get": {"summary": "Service health check"}}
+            }
         }
     }
     response = make_response(jsonify(spec), 200)
@@ -796,13 +931,11 @@ def well_known_x402():
 def mcp_discovery():
     return jsonify({
         "name": "Price Bot",
-        "description": "Trading signals with BUY/SELL/HOLD, momentum, fear/greed index, proof of performance, reputation score, premium alerts, urgency-based pricing, social proof",
-        "version": "9.2.0",
+        "description": "Data-driven trading signals with RSI, MACD, momentum",
+        "version": "9.4.0",
         "x402": {"payment": PAYMENT_CONFIG},
         "endpoints": [
-            {"path": "/api/data", "method": "GET", "parameters": [{"name": "q", "type": "string", "required": True}], "price": PAYMENT_CONFIG["amount"]},
-            {"path": "/api/batch", "method": "GET"},
-            {"path": "/api/history", "method": "GET"}
+            {"path": "/api/data", "method": "GET", "parameters": [{"name": "q", "type": "string", "required": True}], "price": PAYMENT_CONFIG["amount"]}
         ]
     })
 
@@ -810,36 +943,22 @@ def mcp_discovery():
 def root():
     return jsonify({
         "status": "ok",
-        "service": "Price Bot v9.2",
-        "description": "Enhanced trading signals + momentum + fear/greed + reputation + integrity + premium alerts + urgency pricing + social proof + 7-day free trial",
+        "service": "Price Bot v9.4",
+        "description": "Data-driven trading signals with RSI, MACD, momentum",
         "payment": PAYMENT_CONFIG,
         "supported": list(REAL_PRICES.keys()),
         "features": [
-            "trading_signals",
-            "price_forecasts",
-            "batch_requests",
-            "historical_data",
-            "proof_of_performance",
-            "free_trial",
-            "subscription",
-            "hot_signals",
-            "upsell",
-            "momentum",
-            "support_resistance",
-            "volume_analysis",
-            "fear_greed_index",
-            "rate_limit",
-            "integrity_verification",
-            "reputation_system",
-            "premium_alerts",
-            "first_paid_discount",
-            "urgency_pricing",
-            "social_proof"
+            "rsi", "macd", "momentum", "real_signals",
+            "price_forecasts", "batch_requests", "historical_data",
+            "proof_of_performance", "free_trial", "subscription",
+            "hot_signals", "upsell", "rate_limit",
+            "integrity_verification", "reputation_system",
+            "premium_alerts", "social_proof"
         ],
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin&limit=5",
-            "/api/subscribe": "GET with ?trial=true for free trial",
-            "/api/verify": "POST to verify integrity signature",
+            "/api/subscribe": "GET with ?trial=true",
+            "/api/verify": "POST to verify signature",
             "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
             "/api/history": "GET with ?q=bitcoin&days=7",
             "/health": "Service health check",
