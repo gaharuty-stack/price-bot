@@ -732,4 +732,99 @@ def get_balance():
     try:
         contract = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
         address = PAYMENT_CONFIG["receiver"]
-        url = f"https://api.basescan.org/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}&tag=latest
+        url = f"https://api.basescan.org/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}&tag=latest"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('status') == '1':
+                balance_wei = int(data.get('result', 0))
+                return jsonify({"address": address, "balance_usdc": round(balance_wei / 1_000_000, 4), "updated": datetime.now().isoformat()})
+    except Exception as e:
+        logger.error(f"Ошибка баланса: {e}")
+    return jsonify({"error": "Не удалось получить баланс"}), 503
+
+# ============================================
+# OPENAPI
+# ============================================
+@app.route('/openapi.json', methods=['GET'])
+def openapi_spec():
+    spec = {
+        "openapi": "3.0.0",
+        "info": {
+            "title": "Trading Signals & Market Data API",
+            "version": "8.1.1",
+            "description": f"Enhanced trading signals with momentum, fear/greed, reputation score, and cryptographic integrity verification. Payment: 0.10 USDC on Base. {PAYMENT_CONFIG['trial_days']}-day free trial.",
+            "keywords": ["crypto", "signals", "trading", "forecast", "momentum", "fear-greed", "trial", "integrity", "reputation"],
+            "x402": PAYMENT_CONFIG
+        },
+        "servers": [{"url": "https://price-bot-y95q.onrender.com"}],
+        "paths": {
+            "/api/data": {
+                "get": {
+                    "summary": "Get enhanced trading signal with reputation and integrity signature",
+                    "parameters": [
+                        {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
+                        {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}},
+                        {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["pretty"]}}
+                    ],
+                    "responses": {
+                        "200": {"description": "Enhanced signal data with reputation and integrity signature"},
+                        "402": {"description": "Payment Required (0.10 USDC)"},
+                        "429": {"description": "Rate Limit Exceeded"}
+                    }
+                }
+            },
+            "/api/verify": {"post": {"summary": "Verify integrity signature of a response"}},
+            "/api/subscribe": {"get": {"summary": "Subscribe for 30-day unlimited access ($5.00) or 7-day free trial"}},
+            "/api/batch": {"get": {"summary": "Batch signals for multiple coins"}},
+            "/api/history": {"get": {"summary": "Historical prices"}},
+            "/health": {"get": {"summary": "Service health check"}}
+        }
+    }
+    response = make_response(jsonify(spec), 200)
+    for k, v in get_payment_headers().items():
+        response.headers[k] = v
+    return response
+
+@app.route('/.well-known/x402', methods=['GET'])
+def well_known_x402():
+    return openapi_spec()
+
+@app.route('/.well-known/mcp.json', methods=['GET'])
+def mcp_discovery():
+    return jsonify({
+        "name": "Price Bot",
+        "description": "Trading signals with BUY/SELL/HOLD, momentum, fear/greed index, proof of performance, reputation score",
+        "version": "8.1.1",
+        "x402": {"payment": PAYMENT_CONFIG},
+        "endpoints": [
+            {"path": "/api/data", "method": "GET", "parameters": [{"name": "q", "type": "string", "required": True}], "price": PAYMENT_CONFIG["amount"]},
+            {"path": "/api/batch", "method": "GET"},
+            {"path": "/api/history", "method": "GET"}
+        ]
+    })
+
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({
+        "status": "ok",
+        "service": "Price Bot v8.1.1",
+        "description": "Enhanced trading signals + momentum + fear/greed + reputation + integrity + 7-day free trial",
+        "payment": PAYMENT_CONFIG,
+        "supported": list(REAL_PRICES.keys()),
+        "features": ["trading_signals", "price_forecasts", "batch_requests", "historical_data", "proof_of_performance", "free_trial", "subscription", "hot_signals", "upsell", "momentum", "support_resistance", "volume_analysis", "fear_greed_index", "rate_limit", "integrity_verification", "reputation_system"],
+        "endpoints": {
+            "/api/data": "GET with ?q=bitcoin&limit=5",
+            "/api/subscribe": "GET with ?trial=true for free trial",
+            "/api/verify": "POST to verify integrity signature",
+            "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
+            "/api/history": "GET with ?q=bitcoin&days=7",
+            "/health": "Service health check",
+            "/openapi.json": "OpenAPI spec",
+            "/.well-known/x402": "x402 discovery",
+            "/.well-known/mcp.json": "MCP discovery"
+        }
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, threaded=True)
