@@ -131,7 +131,6 @@ def get_reputation(query: str) -> dict:
                 "rank": "top 5%" if accuracy > 70 else "top 20%" if accuracy > 60 else "average"
             }
         
-        # Новый запрос — начальные данные
         initial_total = random.randint(500, 1000)
         initial_correct = int(initial_total * random.uniform(0.65, 0.78))
         conn = sqlite3.connect('bot_stats.db')
@@ -332,7 +331,7 @@ threading.Thread(target=price_updater_loop, daemon=True).start()
 update_prices()
 
 # ============================================
-# ГЕНЕРАЦИЯ ДАННЫХ (С РЕПУТАЦИЕЙ)
+# ГЕНЕРАЦИЯ ДАННЫХ
 # ============================================
 def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     query_lower = query.lower()
@@ -344,9 +343,6 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     
     change_24h = round(random.uniform(-2.5, 2.5), 2)
     
-    # ============================================
-    # СИГНАЛ
-    # ============================================
     if change_24h > 1.5:
         signal = "BUY"
         confidence = round(random.uniform(70, 90), 1)
@@ -363,9 +359,6 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         target_price = current_price
         stop_loss = current_price
     
-    # ============================================
-    # HOT СИГНАЛ
-    # ============================================
     is_hot = random.random() < 0.15
     hot_confidence = round(random.uniform(90, 98), 1) if is_hot else None
     hot_reason = random.choice([
@@ -376,35 +369,20 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         "volume spike with price increase"
     ]) if is_hot else None
     
-    # ============================================
-    # ПРОГНОЗЫ
-    # ============================================
     forecast_1d = round(current_price * (1 + random.uniform(-0.02, 0.02)), 2)
     forecast_3d = round(current_price * (1 + random.uniform(-0.04, 0.04)), 2)
     forecast_7d = round(current_price * (1 + random.uniform(-0.06, 0.06)), 2)
     
-    # ============================================
-    # MOMENTUM
-    # ============================================
     momentum = round(random.uniform(20, 90), 1)
     momentum_label = "strong" if momentum > 70 else "moderate" if momentum > 40 else "weak"
     
-    # ============================================
-    # SUPPORT / RESISTANCE
-    # ============================================
     support = round(current_price * (1 - random.uniform(0.02, 0.05)), 2)
     resistance = round(current_price * (1 + random.uniform(0.02, 0.05)), 2)
     
-    # ============================================
-    # VOLUME ANALYSIS
-    # ============================================
     volume_labels = ["normal", "high", "extreme"]
     volume_weights = [0.6, 0.3, 0.1]
     volume_label = random.choices(volume_labels, weights=volume_weights)[0]
     
-    # ============================================
-    # FEAR & GREED INDEX
-    # ============================================
     fear_greed = random.randint(20, 85)
     fear_greed_label = (
         "extreme fear" if fear_greed < 25 else
@@ -414,9 +392,6 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         "extreme greed"
     )
     
-    # ============================================
-    # PROOF OF PERFORMANCE
-    # ============================================
     accuracy_7d = random.randint(65, 78)
     accuracy_30d = random.randint(58, 70)
     signals_total = random.randint(120, 220)
@@ -425,9 +400,6 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     price_at_signal = round(current_price * (1 + random.uniform(-0.003, 0.003)), 2)
     signal_age = random.randint(5, 180)
     
-    # ============================================
-    # РЕПУТАЦИЯ (НОВОЕ)
-    # ============================================
     reputation = get_reputation(query_lower)
     
     result = {
@@ -445,24 +417,18 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         "high_24h": round(current_price * (1 + random.uniform(0.01, 0.025)), 2),
         "low_24h": round(current_price * (1 - random.uniform(0.01, 0.025)), 2),
         "volume_24h": round(random.uniform(500000000, 50000000000), 2),
-        "momentum": {
-            "value": momentum,
-            "label": momentum_label
-        },
+        "momentum": {"value": momentum, "label": momentum_label},
         "support": support,
         "resistance": resistance,
         "volume_analysis": volume_label,
-        "fear_greed": {
-            "value": fear_greed,
-            "label": fear_greed_label
-        },
+        "fear_greed": {"value": fear_greed, "label": fear_greed_label},
         "backtest": {
             "accuracy_7d": accuracy_7d,
             "accuracy_30d": accuracy_30d,
             "signals_total": signals_total,
             "win_rate": win_rate
         },
-        "reputation": reputation,  # <-- НОВОЕ
+        "reputation": reputation,
         "price_at_signal": price_at_signal,
         "signal_age_seconds": signal_age,
         "is_trial": is_trial,
@@ -544,11 +510,7 @@ def get_data():
             "subscription": {
                 "available": True,
                 "price": f"${PAYMENT_CONFIG['subscription_price']}/month",
-                "trial": {
-                    "available": True,
-                    "days": PAYMENT_CONFIG['trial_days'],
-                    "endpoint": "/api/subscribe?trial=true"
-                },
+                "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "endpoint": "/api/subscribe?trial=true"},
                 "endpoint": "/api/subscribe"
             }
         }), 402)
@@ -593,12 +555,7 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
         "bundle_50": "50 signals for $3.00 (save 40%)",
         "daily_pass": "unlimited for 24h — $2.00",
         "subscribe": f"${PAYMENT_CONFIG['subscription_price']}/month — unlimited",
-        "trial": {
-            "available": True,
-            "days": PAYMENT_CONFIG['trial_days'],
-            "price_after": f"${PAYMENT_CONFIG['subscription_price']}/month",
-            "endpoint": "/api/subscribe?trial=true"
-        }
+        "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "price_after": f"${PAYMENT_CONFIG['subscription_price']}/month", "endpoint": "/api/subscribe?trial=true"}
     }
     if has_hot:
         upsell["hot_signal"] = f"Premium signal with 90%+ confidence — ${PAYMENT_CONFIG['hot_price']}"
@@ -614,28 +571,17 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
         "data": results,
         "source": "self-updating",
         "cached": False,
-        "reliability": {
-            "score": 0.99,
-            "uptime_24h": "99.9%",
-            "response_time_ms": 45
-        },
+        "reliability": {"score": 0.99, "uptime_24h": "99.9%", "response_time_ms": 45},
         "next_update_in_seconds": seconds_until_update,
         "request_id": request_id,
         "payment_info": {
             "price": "$0.10 per request",
-            "discounts": {
-                "5+ coins": "$0.08 each",
-                "10+ coins": "$0.07 each"
-            },
+            "discounts": {"5+ coins": "$0.08 each", "10+ coins": "$0.07 each"},
             "subscription": {
                 "available": True,
                 "price": f"${PAYMENT_CONFIG['subscription_price']}/month",
                 "unlimited": True,
-                "trial": {
-                    "available": True,
-                    "days": PAYMENT_CONFIG['trial_days'],
-                    "endpoint": "/api/subscribe?trial=true"
-                }
+                "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "endpoint": "/api/subscribe?trial=true"}
             }
         },
         "upsell": upsell
@@ -679,18 +625,12 @@ def verify():
     data = request.json
     if not data:
         return jsonify({"error": "No data provided"}), 400
-    
     signature = data.get("signature")
     response_data = data.get("data")
-    
     if not signature or not response_data:
         return jsonify({"error": "Missing signature or data"}), 400
-    
     is_valid = verify_signature(response_data, signature)
-    return jsonify({
-        "valid": is_valid,
-        "message": "Signature is valid" if is_valid else "Signature is invalid"
-    })
+    return jsonify({"valid": is_valid, "message": "Signature is valid" if is_valid else "Signature is invalid"})
 
 # ============================================
 # ПОДПИСКА
@@ -699,84 +639,46 @@ def verify():
 def subscribe():
     trial = request.args.get('trial', '').lower() == 'true'
     client_ip = request.remote_addr
-    
     if trial:
         if add_subscriber(client_ip, PAYMENT_CONFIG['trial_days']):
-            return jsonify({
-                "status": "ok",
-                "message": f"{PAYMENT_CONFIG['trial_days']}-day free trial activated",
-                "expires_at": (datetime.now() + timedelta(days=PAYMENT_CONFIG['trial_days'])).isoformat(),
-                "price_after_trial": f"${PAYMENT_CONFIG['subscription_price']}/month"
-            })
+            return jsonify({"status": "ok", "message": f"{PAYMENT_CONFIG['trial_days']}-day free trial activated", "expires_at": (datetime.now() + timedelta(days=PAYMENT_CONFIG['trial_days'])).isoformat(), "price_after_trial": f"${PAYMENT_CONFIG['subscription_price']}/month"})
         return jsonify({"error": "Failed to activate trial"}), 500
-    
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
     paid = bool(payment_tx and len(payment_tx) > 10)
-    
     if not paid:
-        response = make_response(jsonify({
-            "error": "Payment Required",
-            "message": f"Please send {PAYMENT_CONFIG['subscription_price']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']} for 30-day subscription",
-            "price": f"{PAYMENT_CONFIG['subscription_price']} {PAYMENT_CONFIG['currency']}",
-            "network": PAYMENT_CONFIG['network'],
-            "receiver": PAYMENT_CONFIG['receiver'],
-            "subscription_days": 30,
-            "trial": {
-                "available": True,
-                "days": PAYMENT_CONFIG['trial_days'],
-                "endpoint": "/api/subscribe?trial=true"
-            }
-        }), 402)
+        response = make_response(jsonify({"error": "Payment Required", "message": f"Please send {PAYMENT_CONFIG['subscription_price']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']} for 30-day subscription", "price": f"{PAYMENT_CONFIG['subscription_price']} {PAYMENT_CONFIG['currency']}", "network": PAYMENT_CONFIG['network'], "receiver": PAYMENT_CONFIG['receiver'], "subscription_days": 30, "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "endpoint": "/api/subscribe?trial=true"}}), 402)
         for k, v in get_payment_headers().items():
             response.headers[k] = v
         return response
-
     if add_subscriber(client_ip, 30):
-        return jsonify({
-            "status": "ok",
-            "message": "Subscription active for 30 days",
-            "expires_at": (datetime.now() + timedelta(days=30)).isoformat()
-        })
+        return jsonify({"status": "ok", "message": "Subscription active for 30 days", "expires_at": (datetime.now() + timedelta(days=30)).isoformat()})
     return jsonify({"error": "Failed to activate subscription"}), 500
 
 # ============================================
-# ОСТАЛЬНЫЕ ЭНДПОИНТЫ
+# BATCH
 # ============================================
 @app.route('/api/batch', methods=['GET'])
 def batch_data():
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
     paid = bool(payment_tx and len(payment_tx) > 10)
     client_ip = request.remote_addr
-
     if is_subscriber(client_ip):
         paid = True
-
     if not paid:
-        response = make_response(jsonify({
-            "error": "Payment Required",
-            "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"
-        }), 402)
+        response = make_response(jsonify({"error": "Payment Required", "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"}), 402)
         for k, v in get_payment_headers().items():
             response.headers[k] = v
         return response
-
     query = request.args.get('q', '')
     if not query:
         return jsonify({"error": "Missing parameter", "message": "Укажите ?q=bitcoin,ethereum,solana"}), 400
-    
     coins = [c.strip() for c in query.split(',') if c.strip()][:10]
     results = []
     for coin in coins:
         data = get_price_data(coin, is_trial=False)
         if data:
             results.append(data)
-    
-    response_data = {
-        "status": "ok",
-        "count": len(results),
-        "timestamp": datetime.now().isoformat(),
-        "data": results
-    }
+    response_data = {"status": "ok", "count": len(results), "timestamp": datetime.now().isoformat(), "data": results}
     response = make_response(jsonify(response_data), 200)
     for k, v in get_payment_headers(len(coins)).items():
         response.headers[k] = v
@@ -784,189 +686,50 @@ def batch_data():
     response.headers['X-Payment-Tx-Hash'] = payment_tx
     return response
 
+# ============================================
+# ИСТОРИЯ
+# ============================================
 @app.route('/api/history', methods=['GET'])
 def get_history():
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
     paid = bool(payment_tx and len(payment_tx) > 10)
     client_ip = request.remote_addr
-
     if is_subscriber(client_ip):
         paid = True
-
     if not paid:
-        response = make_response(jsonify({
-            "error": "Payment Required",
-            "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"
-        }), 402)
+        response = make_response(jsonify({"error": "Payment Required", "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"}), 402)
         for k, v in get_payment_headers().items():
             response.headers[k] = v
         return response
-
     query = request.args.get('q', '').strip()
     days = request.args.get('days', 7, type=int)
     days = min(max(days, 1), 30)
-
     if not query:
         return jsonify({"error": "Missing parameter", "message": "Укажите ?q=bitcoin"}), 400
-
     if not re.match(r'^[a-zA-Z0-9\-\_\s,]+$', query):
         return jsonify({"error": "Invalid query"}), 400
-
     base_price = REAL_PRICES.get(query.lower(), 65000)
     history = []
     for i in range(days):
         day_price = base_price * (1 + random.uniform(-0.05, 0.05))
-        history.append({
-            "date": (datetime.now() - timedelta(days=i)).isoformat(),
-            "price": round(day_price, 2)
-        })
-
-    response = make_response(jsonify({
-        "status": "ok",
-        "query": query,
-        "days": days,
-        "history": history
-    }), 200)
-
+        history.append({"date": (datetime.now() - timedelta(days=i)).isoformat(), "price": round(day_price, 2)})
+    response = make_response(jsonify({"status": "ok", "query": query, "days": days, "history": history}), 200)
     for k, v in get_payment_headers().items():
         response.headers[k] = v
     response.headers['X-Payment-Verified'] = 'true'
     response.headers['X-Payment-Tx-Hash'] = payment_tx
     return response
 
+# ============================================
+# HEALTH
+# ============================================
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({
-        "status": "ok",
-        "service": "Price Bot",
-        "version": "8.1",
-        "uptime": str(datetime.now() - start_time),
-        "cache_size": len(response_cache),
-        "last_update": last_update.isoformat() if last_update else "never",
-        "prices_loaded": len(REAL_PRICES)
-    })
+    return jsonify({"status": "ok", "service": "Price Bot", "version": "8.1.1", "uptime": str(datetime.now() - start_time), "cache_size": len(response_cache), "last_update": last_update.isoformat() if last_update else "never", "prices_loaded": len(REAL_PRICES)})
 
 @app.route('/admin/balance', methods=['GET'])
 def get_balance():
     try:
         contract = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
         address = PAYMENT_CONFIG["receiver"]
-        url = f"https://api.basescan.org/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}&tag=latest"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('status') == '1':
-                balance_wei = int(data.get('result', 0))
-                return jsonify({
-                    "address": address,
-                    "balance_usdc": round(balance_wei / 1_000_000, 4),
-                    "updated": datetime.now().isoformat()
-                })
-    except Exception as e:
-        logger.error(f"Ошибка баланса: {e}")
-    return jsonify({"error": "Не удалось получить баланс"}), 503
-
-@app.route('/openapi.json', methods=['GET'])
-def openapi_spec():
-    spec = {
-        "openapi": "3.0.0",
-        "info": {
-            "title": "Trading Signals & Market Data API",
-            "version": "8.1.0",
-            "description": f"Enhanced trading signals with momentum, fear/greed, reputation score, and cryptographic integrity verification. Payment: 0.10 USDC on Base. {PAYMENT_CONFIG['trial_days']}-day free trial.",
-            "keywords": ["crypto", "signals", "trading", "forecast", "momentum", "fear-greed", "trial", "integrity", "reputation"],
-            "x402": PAYMENT_CONFIG
-        },
-        "servers": [{"url": "https://price-bot-6erv.onrender.com"}],
-        "paths": {
-            "/api/data": {
-                "get": {
-                    "summary": "Get enhanced trading signal with reputation and integrity signature",
-                    "parameters": [
-                        {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
-                        {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}},
-                        {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["pretty"]}}
-                    ],
-                    "responses": {
-                        "200": {"description": "Enhanced signal data with reputation and integrity signature"},
-                        "402": {"description": "Payment Required (0.10 USDC)"},
-                        "429": {"description": "Rate Limit Exceeded"}
-                    }
-                }
-            },
-            "/api/verify": {
-                "post": {
-                    "summary": "Verify integrity signature of a response"
-                }
-            },
-            "/api/subscribe": {
-                "get": {
-                    "summary": "Subscribe for 30-day unlimited access ($5.00) or 7-day free trial"
-                }
-            },
-            "/api/batch": {
-                "get": {
-                    "summary": "Batch signals for multiple coins"
-                }
-            },
-            "/api/history": {
-                "get": {
-                    "summary": "Historical prices"
-                }
-            },
-            "/health": {
-                "get": {
-                    "summary": "Service health check"
-                }
-            }
-        }
-    }
-    response = make_response(jsonify(spec), 200)
-    for k, v in get_payment_headers().items():
-        response.headers[k] = v
-    return response
-
-@app.route('/.well-known/x402', methods=['GET'])
-def well_known_x402():
-    return openapi_spec()
-
-@app.route('/', methods=['GET'])
-def root():
-    return jsonify({
-        "status": "ok",
-        "service": "Price Bot v8.1",
-        "description": "Enhanced trading signals + momentum + fear/greed + reputation + integrity + 7-day free trial",
-        "payment": PAYMENT_CONFIG,
-        "supported": list(REAL_PRICES.keys()),
-        "features": [
-            "trading_signals",
-            "price_forecasts",
-            "batch_requests",
-            "historical_data",
-            "proof_of_performance",
-            "free_trial",
-            "subscription",
-            "hot_signals",
-            "upsell",
-            "momentum",
-            "support_resistance",
-            "volume_analysis",
-            "fear_greed_index",
-            "rate_limit",
-            "integrity_verification",
-            "reputation_system"
-        ],
-        "endpoints": {
-            "/api/data": "GET with ?q=bitcoin&limit=5",
-            "/api/subscribe": "GET with ?trial=true for free trial",
-            "/api/verify": "POST to verify integrity signature",
-            "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
-            "/api/history": "GET with ?q=bitcoin&days=7",
-            "/health": "Service health check",
-            "/openapi.json": "OpenAPI spec",
-            "/.well-known/x402": "x402 discovery"
-        }
-    })
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+        url = f"https://api.basescan.org/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}&tag=latest
