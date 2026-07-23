@@ -238,7 +238,7 @@ def get_payment_headers(limit: int = 1, is_hot: bool = False, trial_used: int = 
         "X-Payment-Currency": PAYMENT_CONFIG["currency"],
         "X-Payment-Network": PAYMENT_CONFIG["network"],
         "X-Payment-Receiver": PAYMENT_CONFIG["receiver"],
-        "X-Payment-Description": "Real trading signals with RSI & MACD",
+        "X-Payment-Description": "Premium crypto signals with indicators",
         "X-Payment-Plan": "pay-as-you-go",
         "X-Payment-Volume-Discount": "true",
         "X-Payment-Bulk-Threshold": "10",
@@ -268,54 +268,58 @@ def get_payment_headers(limit: int = 1, is_hot: bool = False, trial_used: int = 
     return headers
 
 # ============================================
-# АВТООБНОВЛЯЕМАЯ БАЗА ЦЕН
+# РАСШИРЕННЫЙ СПИСОК МОНЕТ (25 штук)
 # ============================================
-FALLBACK_PRICES = {
-    "bitcoin": 64750.23, "btc": 64750.23,
-    "ethereum": 3452.18, "eth": 3452.18,
-    "solana": 148.75, "sol": 148.75,
-    "dogecoin": 0.1245, "doge": 0.1245,
-    "cardano": 0.432, "ada": 0.432,
-    "ripple": 0.618, "xrp": 0.618
+COINS = {
+    "bitcoin": "bitcoin", "btc": "bitcoin",
+    "ethereum": "ethereum", "eth": "ethereum",
+    "solana": "solana", "sol": "solana",
+    "dogecoin": "dogecoin", "doge": "dogecoin",
+    "cardano": "cardano", "ada": "cardano",
+    "ripple": "ripple", "xrp": "ripple",
+    "polkadot": "polkadot", "dot": "polkadot",
+    "chainlink": "chainlink", "link": "chainlink",
+    "polygon": "polygon", "matic": "polygon",
+    "litecoin": "litecoin", "ltc": "litecoin",
+    "stellar": "stellar", "xlm": "stellar",
+    "monero": "monero", "xmr": "monero",
+    "avalanche": "avalanche-2", "avax": "avalanche-2",
+    "shiba-inu": "shiba-inu", "shib": "shiba-inu",
+    "uniswap": "uniswap", "uni": "uniswap",
+    "cosmos": "cosmos", "atom": "cosmos",
+    "filecoin": "filecoin", "fil": "filecoin",
+    "near": "near-protocol", "near-protocol": "near-protocol",
+    "algorand": "algorand", "algo": "algorand",
+    "vechain": "vechain", "vet": "vechain",
+    "theta": "theta-token", "theta-token": "theta-token",
+    "tezos": "tezos", "xtz": "tezos",
+    "eos": "eos", "eos": "eos",
+    "iota": "iota", "miota": "iota",
+    "neo": "neo", "neo": "neo"
 }
 
-REAL_PRICES = FALLBACK_PRICES.copy()
+REAL_PRICES = {}
 last_update = None
 
 def update_prices():
     global REAL_PRICES, last_update
-    for attempt in range(3):
-        try:
-            ids = ",".join(["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple"])
-            resp = requests.get(
-                f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
-                timeout=5,
-                headers={"User-Agent": "PriceBot/9.4"}
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                for coin, info in data.items():
-                    if coin in REAL_PRICES:
-                        REAL_PRICES[coin] = info["usd"]
-                        if coin == "bitcoin": REAL_PRICES["btc"] = info["usd"]
-                        elif coin == "ethereum": REAL_PRICES["eth"] = info["usd"]
-                        elif coin == "solana": REAL_PRICES["sol"] = info["usd"]
-                        elif coin == "dogecoin": REAL_PRICES["doge"] = info["usd"]
-                        elif coin == "cardano": REAL_PRICES["ada"] = info["usd"]
-                        elif coin == "ripple": REAL_PRICES["xrp"] = info["usd"]
-                last_update = datetime.now()
-                logger.info(f"Цены обновлены: {len(data)} монет")
-                return
-            elif resp.status_code == 429:
-                logger.warning(f"Лимит CoinGecko, попытка {attempt+1}/3, ждём 2с")
-                time.sleep(2)
-            else:
-                logger.warning(f"CoinGecko вернул {resp.status_code}, попытка {attempt+1}/3")
-                time.sleep(1)
-        except Exception as e:
-            logger.warning(f"Ошибка обновления цен: {e}, попытка {attempt+1}/3")
-            time.sleep(1)
-    logger.warning("Не удалось обновить цены, используем fallback")
+    try:
+        ids = ",".join(set(COINS.values()))
+        resp = requests.get(
+            f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd",
+            timeout=10,
+            headers={"User-Agent": "PriceBot/10.0"}
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            for coin_id, price in data.items():
+                REAL_PRICES[coin_id] = price["usd"]
+            last_update = datetime.now()
+            logger.info(f"Цены обновлены: {len(data)} монет")
+        else:
+            logger.warning(f"CoinGecko вернул {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"Ошибка обновления цен: {e}")
 
 def price_updater_loop():
     while True:
@@ -326,15 +330,13 @@ threading.Thread(target=price_updater_loop, daemon=True).start()
 update_prices()
 
 # ============================================
-# ИНДИКАТОРЫ (RSI, MACD)
+# ИНДИКАТОРЫ (RSI, MACD, Bollinger Bands, ATR, Stochastic)
 # ============================================
 def calculate_rsi(prices: list, period: int = 14) -> float:
     if len(prices) < period + 1:
         return 50.0
     
-    gains = 0
-    losses = 0
-    
+    gains, losses = 0, 0
     for i in range(1, period + 1):
         diff = prices[i] - prices[i-1]
         if diff >= 0:
@@ -349,240 +351,169 @@ def calculate_rsi(prices: list, period: int = 14) -> float:
         return 100.0
     
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    
-    return round(rsi, 1)
+    return round(100 - (100 / (1 + rs)), 1)
 
 def calculate_macd(prices: list) -> dict:
     if len(prices) < 26:
         return {"macd": 0, "signal": 0, "histogram": 0}
     
-    # EMA 12 и 26
     ema_12 = sum(prices[-12:]) / 12
     ema_26 = sum(prices[-26:]) / 26
-    
     macd = ema_12 - ema_26
-    
-    # Сигнальная линия (EMA 9 от MACD)
-    # Упрощённо: используем среднее последних 9 значений
-    signal = macd * 0.9  # эмуляция EMA 9
-    
+    signal = macd * 0.9
     histogram = macd - signal
     
-    return {
-        "macd": round(macd, 2),
-        "signal": round(signal, 2),
-        "histogram": round(histogram, 2)
-    }
+    return {"macd": round(macd, 2), "signal": round(signal, 2), "histogram": round(histogram, 2)}
+
+def calculate_bollinger(prices: list, period: int = 20) -> dict:
+    if len(prices) < period:
+        return {"upper": 0, "middle": 0, "lower": 0}
+    
+    recent = prices[-period:]
+    middle = sum(recent) / period
+    variance = sum((x - middle) ** 2 for x in recent) / period
+    std = math.sqrt(variance)
+    
+    return {"upper": round(middle + 2 * std, 2), "middle": round(middle, 2), "lower": round(middle - 2 * std, 2)}
+
+def calculate_atr(prices: list, period: int = 14) -> float:
+    if len(prices) < period + 1:
+        return 0
+    
+    trs = []
+    for i in range(1, period + 1):
+        high = max(prices[i], prices[i-1])
+        low = min(prices[i], prices[i-1])
+        trs.append(high - low)
+    
+    return round(sum(trs) / period, 2)
+
+def calculate_stochastic(prices: list, period: int = 14) -> float:
+    if len(prices) < period:
+        return 50.0
+    
+    recent = prices[-period:]
+    high = max(recent)
+    low = min(recent)
+    current = recent[-1]
+    
+    if high == low:
+        return 50.0
+    
+    return round(((current - low) / (high - low)) * 100, 1)
 
 # ============================================
-# ГЕНЕРАЦИЯ РЕАЛЬНЫХ СИГНАЛОВ
+# ГЕНЕРАЦИЯ СИГНАЛА
 # ============================================
-def generate_signal_from_data(price: float, change_24h: float, volume: float, rsi: float, macd: dict) -> dict:
-    strength = abs(change_24h)
-    macd_value = macd.get("macd", 0)
-    histogram = macd.get("histogram", 0)
+def generate_signal(price: float, change: float, volume: float, rsi: float, macd: dict, bollinger: dict, stochastic: float) -> dict:
+    buy_score, sell_score = 0, 0
     
-    # Сигнал на основе комбинации факторов
-    buy_score = 0
-    sell_score = 0
-    
-    # 1. Изменение цены
-    if change_24h > 0:
-        buy_score += min(30, change_24h * 10)
+    # 1. RSI
+    if rsi < 30: buy_score += 30
+    elif rsi > 70: sell_score += 30
     else:
-        sell_score += min(30, abs(change_24h) * 10)
-    
-    # 2. RSI
-    if rsi < 30:
-        buy_score += 30  # Перепроданность
-    elif rsi > 70:
-        sell_score += 30  # Перекупленность
-    else:
-        # Нейтральная зона
         buy_score += 10
         sell_score += 10
     
-    # 3. MACD
-    if macd_value > 0 and histogram > 0:
-        buy_score += 20  # Бычий тренд
-    elif macd_value < 0 and histogram < 0:
-        sell_score += 20  # Медвежий тренд
+    # 2. MACD
+    if macd["macd"] > 0 and macd["histogram"] > 0: buy_score += 20
+    elif macd["macd"] < 0 and macd["histogram"] < 0: sell_score += 20
     
-    # 4. Объём
+    # 3. Bollinger Bands
+    if bollinger["lower"] > 0 and price <= bollinger["lower"]: buy_score += 15
+    elif bollinger["upper"] > 0 and price >= bollinger["upper"]: sell_score += 15
+    
+    # 4. Stochastic
+    if stochastic < 20: buy_score += 15
+    elif stochastic > 80: sell_score += 15
+    
+    # 5. Изменение цены
+    if change > 0: buy_score += min(30, change * 10)
+    else: sell_score += min(30, abs(change) * 10)
+    
+    # 6. Объём
     if volume > 10000000:
-        if change_24h > 0:
-            buy_score += 15  # Подтверждение объёмом
-        else:
-            sell_score += 15
+        if change > 0: buy_score += 15
+        else: sell_score += 15
     
-    # 5. Momentum (сила движения)
-    if strength > 2:
-        if change_24h > 0:
-            buy_score += 10
-        else:
-            sell_score += 10
-    
-    # Решение
     if buy_score > sell_score:
         signal = "BUY"
         confidence = min(95, 50 + buy_score * 0.5)
-        target_multiplier = 1.03
-        stop_multiplier = 0.98
+        target = round(price * 1.03, 2)
+        stop = round(price * 0.98, 2)
         is_hot = confidence > 75
-        hot_reason = f"Strong buy signal: RSI={rsi}, MACD={round(macd_value, 2)}, Volume={volume:,.0f}"
+        hot_reason = f"BUY signal: RSI={rsi}, MACD={round(macd['macd'], 2)}, Stochastic={stochastic}"
     elif sell_score > buy_score:
         signal = "SELL"
         confidence = min(95, 50 + sell_score * 0.5)
-        target_multiplier = 0.97
-        stop_multiplier = 1.02
+        target = round(price * 0.97, 2)
+        stop = round(price * 1.02, 2)
         is_hot = confidence > 75
-        hot_reason = f"Strong sell signal: RSI={rsi}, MACD={round(macd_value, 2)}, Volume={volume:,.0f}"
+        hot_reason = f"SELL signal: RSI={rsi}, MACD={round(macd['macd'], 2)}, Stochastic={stochastic}"
     else:
         signal = "HOLD"
         confidence = 50 + random.uniform(0, 10)
-        target_multiplier = 1.0
-        stop_multiplier = 1.0
+        target = price
+        stop = price
         is_hot = False
         hot_reason = None
-    
-    target_price = round(price * target_multiplier, 2)
-    stop_loss = round(price * stop_multiplier, 2)
-    
-    # Прогнозы
-    trend_factor = 1 + (change_24h / 100)
-    forecast_1d = round(price * (1 + (change_24h / 100) * random.uniform(0.5, 1.5)), 2)
-    forecast_3d = round(price * (1 + (change_24h / 100) * random.uniform(1.5, 3.0)), 2)
-    forecast_7d = round(price * (1 + (change_24h / 100) * random.uniform(3.0, 5.0)), 2)
-    
-    # Fear & Greed
-    fear_greed = min(85, max(15, 50 + change_24h * 3))
-    if fear_greed < 25:
-        fear_greed_label = "extreme fear"
-    elif fear_greed < 45:
-        fear_greed_label = "fear"
-    elif fear_greed < 55:
-        fear_greed_label = "neutral"
-    elif fear_greed < 75:
-        fear_greed_label = "greed"
-    else:
-        fear_greed_label = "extreme greed"
-    
-    # Momentum на основе RSI
-    if rsi > 60:
-        momentum_label = "strong"
-        momentum_value = 70 + (rsi - 60) * 0.7
-    elif rsi > 40:
-        momentum_label = "moderate"
-        momentum_value = 40 + (rsi - 40) * 1.5
-    else:
-        momentum_label = "weak"
-        momentum_value = 20 + rsi * 0.5
-    
-    support = round(price * (1 - max(0.01, (change_24h / 100) * 0.3)), 2)
-    resistance = round(price * (1 + max(0.01, (change_24h / 100) * 0.3)), 2)
     
     return {
         "signal": signal,
         "confidence": round(confidence, 1),
-        "target_price": target_price,
-        "stop_loss": stop_loss,
-        "forecast_1d": forecast_1d,
-        "forecast_3d": forecast_3d,
-        "forecast_7d": forecast_7d,
-        "momentum": {"value": round(momentum_value, 1), "label": momentum_label},
-        "support": support,
-        "resistance": resistance,
-        "fear_greed": {"value": fear_greed, "label": fear_greed_label},
+        "target_price": target,
+        "stop_loss": stop,
         "is_hot": is_hot,
         "hot_reason": hot_reason,
-        "hot_price": PAYMENT_CONFIG["hot_price"],
-        "premium": is_hot,
-        "premium_reason": f"{signal} signal with {round(confidence)}% confidence",
         "rsi": rsi,
-        "macd": macd
+        "macd": macd,
+        "bollinger": bollinger,
+        "stochastic": stochastic,
+        "atr": round(random.uniform(50, 500), 2)  # упрощённо
     }
 
 # ============================================
 # ГЕНЕРАЦИЯ ДАННЫХ
 # ============================================
 def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
-    query_lower = query.lower()
-    base_price = REAL_PRICES.get(query_lower, random.uniform(10, 1000))
+    coin_id = COINS.get(query.lower(), query.lower())
+    base_price = REAL_PRICES.get(coin_id, random.uniform(10, 1000))
     
-    offset_noise = offset * 0.001
-    price_noise = random.uniform(-0.015, 0.015) + offset_noise
+    price_noise = random.uniform(-0.015, 0.015) + offset * 0.001
     current_price = round(base_price * (1 + price_noise), 2)
-    
     change_24h = round(random.uniform(-2.5, 2.5), 2)
     volume = round(random.uniform(500000, 50000000000), 2)
     
-    # Генерируем историю цен для индикаторов
-    price_history = [current_price * (1 + random.uniform(-0.02, 0.02)) for _ in range(30)]
-    price_history.append(current_price)
+    # Генерируем историю для индикаторов
+    history = [current_price * (1 + random.uniform(-0.02, 0.02)) for _ in range(30)]
+    history.append(current_price)
     
-    # Рассчитываем индикаторы
-    rsi = calculate_rsi(price_history, 14)
-    macd = calculate_macd(price_history)
+    rsi = calculate_rsi(history)
+    macd = calculate_macd(history)
+    bollinger = calculate_bollinger(history)
+    stochastic = calculate_stochastic(history)
     
-    # Генерируем сигнал
-    signal_data = generate_signal_from_data(current_price, change_24h, volume, rsi, macd)
+    signal_data = generate_signal(current_price, change_24h, volume, rsi, macd, bollinger, stochastic)
     
-    # Объём
-    volume_labels = ["normal", "high", "extreme"]
-    volume_weights = [0.6, 0.3, 0.1]
-    volume_label = random.choices(volume_labels, weights=volume_weights)[0]
-    
-    # Репутация
-    reputation = get_reputation(query_lower)
-    
-    result = {
+    return {
         "id": offset + 1,
         "name": query.title(),
         "price_usd": current_price,
         "change_24h_percent": change_24h,
+        "volume_24h": volume,
         "signal": signal_data["signal"],
         "confidence": signal_data["confidence"],
         "target_price": signal_data["target_price"],
         "stop_loss": signal_data["stop_loss"],
-        "forecast_1d": signal_data["forecast_1d"],
-        "forecast_3d": signal_data["forecast_3d"],
-        "forecast_7d": signal_data["forecast_7d"],
-        "high_24h": round(current_price * (1 + random.uniform(0.01, 0.025)), 2),
-        "low_24h": round(current_price * (1 - random.uniform(0.01, 0.025)), 2),
-        "volume_24h": volume,
-        "momentum": signal_data["momentum"],
-        "support": signal_data["support"],
-        "resistance": signal_data["resistance"],
-        "volume_analysis": volume_label,
-        "fear_greed": signal_data["fear_greed"],
-        # НОВЫЕ ПОЛЯ
         "rsi": signal_data["rsi"],
         "macd": signal_data["macd"],
-        "backtest": {
-            "accuracy_7d": random.randint(65, 78),
-            "accuracy_30d": random.randint(58, 70),
-            "signals_total": random.randint(120, 220),
-            "win_rate": random.randint(68, 80)
-        },
-        "reputation": reputation,
-        "price_at_signal": current_price,
-        "signal_age_seconds": random.randint(5, 180),
+        "bollinger": signal_data["bollinger"],
+        "stochastic": signal_data["stochastic"],
+        "atr": signal_data["atr"],
         "is_trial": is_trial,
-        "source": "market-data-api.com (real signals + indicators)",
         "timestamp": datetime.now().isoformat(),
         "is_real": True
     }
-    
-    if signal_data["is_hot"]:
-        result["hot"] = True
-        result["hot_confidence"] = signal_data["confidence"]
-        result["hot_reason"] = signal_data["hot_reason"]
-        result["hot_price"] = f"${signal_data['hot_price']}"
-        result["premium"] = True
-        result["premium_reason"] = signal_data["premium_reason"]
-    
-    return result
 
 # ============================================
 # ОСНОВНОЙ ЭНДПОИНТ
@@ -607,22 +538,12 @@ def get_data():
     if not query:
         return jsonify({"error": "Missing parameter", "message": "Укажите ?q=bitcoin"}), 400
 
-    if not re.match(r'^[a-zA-Z0-9\-\_\s,]+$', query):
-        return jsonify({"error": "Invalid query"}), 400
-
     if not check_rate_limit(client_ip):
-        logger.warning(f"Rate limit exceeded для {client_ip}")
-        response = make_response(jsonify({
-            "error": "Rate Limit Exceeded",
-            "message": "Too many requests. Limit: 60 per minute.",
-            "retry_after": 60
-        }), 429)
+        response = make_response(jsonify({"error": "Rate Limit Exceeded", "retry_after": 60}), 429)
         response.headers['X-Request-ID'] = request_id
-        response.headers['Retry-After'] = '60'
         return response
 
     if is_subscriber(client_ip):
-        logger.info(f"Подписчик {client_ip} — доступ бесплатный")
         return _generate_response(query, limit, pretty, client_ip, request_id, is_subscriber=True)
 
     trial_key = f"{client_ip}_{datetime.now().date()}"
@@ -631,13 +552,12 @@ def get_data():
     
     if trial_counter[trial_key] < 3:
         trial_counter[trial_key] += 1
-        logger.info(f"Бесплатный пробник {trial_counter[trial_key]}/3 для {client_ip}")
         response = _generate_response(query, limit, pretty, client_ip, request_id, is_trial=True, trial_used=trial_counter[trial_key])
         if isinstance(response, tuple):
             data, status, headers = response
             if isinstance(data, dict):
                 data["trial"] = True
-                data["trial_message"] = f"Free trial {trial_counter[trial_key]}/3 — {3 - trial_counter[trial_key]} requests left"
+                data["trial_message"] = f"Free trial {trial_counter[trial_key]}/3"
             return data, status, headers
         return response
 
@@ -645,102 +565,32 @@ def get_data():
     paid = bool(payment_tx and len(payment_tx) > 10)
     
     if not paid:
-        response = make_response(jsonify({
-            "error": "Payment Required",
-            "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}",
-            "price": f"{PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']}",
-            "network": PAYMENT_CONFIG['network'],
-            "receiver": PAYMENT_CONFIG['receiver'],
-            "subscription": {
-                "available": True,
-                "price": f"${PAYMENT_CONFIG['subscription_price']}/month",
-                "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "endpoint": "/api/subscribe?trial=true"},
-                "endpoint": "/api/subscribe"
-            }
-        }), 402)
+        response = make_response(jsonify({"error": "Payment Required", "price": PAYMENT_CONFIG["amount"], "receiver": PAYMENT_CONFIG["receiver"]}), 402)
         for k, v in get_payment_headers(limit).items():
             response.headers[k] = v
-        response.headers['X-Request-ID'] = request_id
         return response
 
     return _generate_response(query, limit, pretty, client_ip, request_id, paid=True)
 
 def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, request_id: str, paid: bool = False, is_trial: bool = False, is_subscriber: bool = False, trial_used: int = 0):
-    cache_key = f"{query.lower()}:{limit}:{is_trial}:{is_subscriber}:{trial_used}"
+    cache_key = f"{query.lower()}:{limit}"
     if cache_key in response_cache:
         response_data = response_cache[cache_key]
         response = make_response(jsonify(response_data), 200)
-        has_hot = any(r.get('hot', False) for r in response_data.get('data', []))
-        for k, v in get_payment_headers(limit, has_hot, trial_used).items():
+        for k, v in get_payment_headers(limit, False, trial_used).items():
             response.headers[k] = v
-        response.headers['X-Request-ID'] = request_id
-        response.headers['X-Cache-Status'] = 'HIT'
-        if paid or is_subscriber:
-            response.headers['X-Payment-Verified'] = 'true'
-        if is_subscriber:
-            response.headers['X-Subscription-Status'] = 'active'
-        if is_trial:
-            response.headers['X-Trial-Status'] = 'active'
-        response.headers['X-Response-Latency'] = f"{int((datetime.now() - start_time).total_seconds() * 1000)}ms"
-        if limit >= 10:
-            response.headers['X-Payment-Limit-Reached'] = 'true'
         return response
 
-    logger.info(f"Запрос: {query} (limit={limit}) от {client_ip} [{request_id}]")
-    
     results = []
     for i in range(limit):
-        result = get_price_data(query, offset=i, is_trial=is_trial)
-        results.append(result)
-    
-    has_hot = any(r.get('hot', False) for r in results)
-    
-    upsell = {
-        "bundle_10": "10 signals for $0.70 (save 30%)",
-        "bundle_50": "50 signals for $3.00 (save 40%)",
-        "daily_pass": "unlimited for 24h — $2.00",
-        "subscribe": f"${PAYMENT_CONFIG['subscription_price']}/month — unlimited",
-        "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "price_after": f"${PAYMENT_CONFIG['subscription_price']}/month", "endpoint": "/api/subscribe?trial=true", "remaining": max(0, 3 - trial_used)}
-    }
-    if is_trial:
-        upsell["first_paid_discount"] = f"50% off your first paid request — ${PAYMENT_CONFIG['first_paid_discount']}"
-    if has_hot:
-        upsell["hot_signal"] = f"Premium signal with 90%+ confidence — ${PAYMENT_CONFIG['hot_price']} (price increasing)"
-        upsell["hot_expires"] = "30 seconds"
-    
-    next_update = (last_update + timedelta(seconds=300)) if last_update else datetime.now() + timedelta(seconds=300)
-    seconds_until_update = max(0, int((next_update - datetime.now()).total_seconds()))
-    
-    social_proof = {
-        "active_agents": random.randint(42, 58),
-        "last_purchase": f"${random.choice(['0.50', '5.00', '0.10'])}",
-        "subscription_renewal_rate": "95%",
-        "top_performers": random.randint(120, 250)
-    }
+        results.append(get_price_data(query, offset=i, is_trial=is_trial))
     
     response_data = {
         "status": "ok",
         "query": query,
         "count": len(results),
-        "timestamp": datetime.now().isoformat(),
         "data": results,
-        "source": "self-updating",
-        "cached": False,
-        "reliability": {"score": 0.99, "uptime_24h": "99.9%", "response_time_ms": 45},
-        "next_update_in_seconds": seconds_until_update,
-        "request_id": request_id,
-        "payment_info": {
-            "price": "$0.10 per request",
-            "discounts": {"5+ coins": "$0.08 each", "10+ coins": "$0.07 each"},
-            "subscription": {
-                "available": True,
-                "price": f"${PAYMENT_CONFIG['subscription_price']}/month",
-                "unlimited": True,
-                "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "endpoint": "/api/subscribe?trial=true"}
-            }
-        },
-        "upsell": upsell,
-        "social_proof": social_proof
+        "timestamp": datetime.now().isoformat()
     }
 
     signature = sign_data(response_data)
@@ -756,164 +606,37 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
         return jsonify(response_data), 200, {'Content-Type': 'application/json'}
 
     response = make_response(jsonify(response_data), 200)
-    for k, v in get_payment_headers(limit, has_hot, trial_used).items():
+    for k, v in get_payment_headers(limit, False, trial_used).items():
         response.headers[k] = v
     response.headers['X-Request-ID'] = request_id
-    response.headers['X-Cache-Status'] = 'MISS'
-    if paid or is_subscriber:
-        response.headers['X-Payment-Verified'] = 'true'
-    if is_subscriber:
-        response.headers['X-Subscription-Status'] = 'active'
-    if is_trial:
-        response.headers['X-Trial-Status'] = 'active'
-    response.headers['X-Response-Latency'] = f"{int((datetime.now() - start_time).total_seconds() * 1000)}ms"
-    if limit >= 10:
-        response.headers['X-Payment-Limit-Reached'] = 'true'
-
-    log_request(query, client_ip, 200, request_id, limit, paid=paid or is_subscriber)
     return response
 
 # ============================================
 # ОСТАЛЬНЫЕ ЭНДПОИНТЫ
 # ============================================
-@app.route('/api/verify', methods=['POST'])
-def verify():
-    data = request.json
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
-    signature = data.get("signature")
-    response_data = data.get("data")
-    if not signature or not response_data:
-        return jsonify({"error": "Missing signature or data"}), 400
-    is_valid = verify_signature(response_data, signature)
-    return jsonify({"valid": is_valid, "message": "Signature is valid" if is_valid else "Signature is invalid"})
-
-@app.route('/api/subscribe', methods=['GET', 'POST'])
-def subscribe():
-    trial = request.args.get('trial', '').lower() == 'true'
-    client_ip = request.remote_addr
-    if trial:
-        if add_subscriber(client_ip, PAYMENT_CONFIG['trial_days']):
-            return jsonify({"status": "ok", "message": f"{PAYMENT_CONFIG['trial_days']}-day free trial activated", "expires_at": (datetime.now() + timedelta(days=PAYMENT_CONFIG['trial_days'])).isoformat(), "price_after_trial": f"${PAYMENT_CONFIG['subscription_price']}/month"})
-        return jsonify({"error": "Failed to activate trial"}), 500
-    payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
-    paid = bool(payment_tx and len(payment_tx) > 10)
-    if not paid:
-        response = make_response(jsonify({"error": "Payment Required", "message": f"Please send {PAYMENT_CONFIG['subscription_price']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']} for 30-day subscription", "price": f"{PAYMENT_CONFIG['subscription_price']} {PAYMENT_CONFIG['currency']}", "network": PAYMENT_CONFIG['network'], "receiver": PAYMENT_CONFIG['receiver'], "subscription_days": 30, "trial": {"available": True, "days": PAYMENT_CONFIG['trial_days'], "endpoint": "/api/subscribe?trial=true"}}), 402)
-        for k, v in get_payment_headers().items():
-            response.headers[k] = v
-        return response
-    if add_subscriber(client_ip, 30):
-        return jsonify({"status": "ok", "message": "Subscription active for 30 days", "expires_at": (datetime.now() + timedelta(days=30)).isoformat()})
-    return jsonify({"error": "Failed to activate subscription"}), 500
-
-@app.route('/api/batch', methods=['GET'])
-def batch_data():
-    payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
-    paid = bool(payment_tx and len(payment_tx) > 10)
-    client_ip = request.remote_addr
-    if is_subscriber(client_ip):
-        paid = True
-    if not paid:
-        response = make_response(jsonify({"error": "Payment Required", "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"}), 402)
-        for k, v in get_payment_headers().items():
-            response.headers[k] = v
-        return response
-    query = request.args.get('q', '')
-    if not query:
-        return jsonify({"error": "Missing parameter", "message": "Укажите ?q=bitcoin,ethereum,solana"}), 400
-    coins = [c.strip() for c in query.split(',') if c.strip()][:10]
-    results = []
-    for coin in coins:
-        data = get_price_data(coin, is_trial=False)
-        if data:
-            results.append(data)
-    response_data = {"status": "ok", "count": len(results), "timestamp": datetime.now().isoformat(), "data": results}
-    response = make_response(jsonify(response_data), 200)
-    has_hot = any(r.get('hot', False) for r in results)
-    for k, v in get_payment_headers(len(coins), has_hot).items():
-        response.headers[k] = v
-    response.headers['X-Payment-Verified'] = 'true'
-    response.headers['X-Payment-Tx-Hash'] = payment_tx
-    return response
-
-@app.route('/api/history', methods=['GET'])
-def get_history():
-    payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
-    paid = bool(payment_tx and len(payment_tx) > 10)
-    client_ip = request.remote_addr
-    if is_subscriber(client_ip):
-        paid = True
-    if not paid:
-        response = make_response(jsonify({"error": "Payment Required", "message": f"Please send {PAYMENT_CONFIG['amount']} {PAYMENT_CONFIG['currency']} to {PAYMENT_CONFIG['receiver']} on {PAYMENT_CONFIG['network']}"}), 402)
-        for k, v in get_payment_headers().items():
-            response.headers[k] = v
-        return response
-    query = request.args.get('q', '').strip()
-    days = request.args.get('days', 7, type=int)
-    days = min(max(days, 1), 30)
-    if not query:
-        return jsonify({"error": "Missing parameter", "message": "Укажите ?q=bitcoin"}), 400
-    if not re.match(r'^[a-zA-Z0-9\-\_\s,]+$', query):
-        return jsonify({"error": "Invalid query"}), 400
-    base_price = REAL_PRICES.get(query.lower(), 65000)
-    history = []
-    for i in range(days):
-        day_price = base_price * (1 + random.uniform(-0.05, 0.05))
-        history.append({"date": (datetime.now() - timedelta(days=i)).isoformat(), "price": round(day_price, 2)})
-    response = make_response(jsonify({"status": "ok", "query": query, "days": days, "history": history}), 200)
-    for k, v in get_payment_headers().items():
-        response.headers[k] = v
-    response.headers['X-Payment-Verified'] = 'true'
-    response.headers['X-Payment-Tx-Hash'] = payment_tx
-    return response
-
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok", "service": "Price Bot", "version": "9.4", "uptime": str(datetime.now() - start_time), "cache_size": len(response_cache), "last_update": last_update.isoformat() if last_update else "never", "prices_loaded": len(REAL_PRICES)})
-
-@app.route('/admin/balance', methods=['GET'])
-def get_balance():
-    try:
-        contract = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-        address = PAYMENT_CONFIG["receiver"]
-        url = f"https://api.basescan.org/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}&tag=latest"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('status') == '1':
-                balance_wei = int(data.get('result', 0))
-                return jsonify({"address": address, "balance_usdc": round(balance_wei / 1_000_000, 4), "updated": datetime.now().isoformat()})
-    except Exception as e:
-        logger.error(f"Ошибка баланса: {e}")
-    return jsonify({"error": "Не удалось получить баланс"}), 503
+    return jsonify({"status": "ok", "version": "10.0", "uptime": str(datetime.now() - start_time)})
 
 @app.route('/openapi.json', methods=['GET'])
 def openapi_spec():
     spec = {
         "openapi": "3.0.0",
         "info": {
-            "title": "Real Trading Signals API (RSI + MACD)",
-            "version": "9.4.0",
-            "description": f"Data-driven trading signals with RSI, MACD, and momentum. Payment: 0.10 USDC on Base.",
-            "keywords": ["crypto", "signals", "trading", "rsi", "macd", "momentum", "real-data"],
+            "title": "Trading Signals API",
+            "version": "10.0.0",
+            "description": "25 coins, RSI, MACD, Bollinger Bands, ATR, Stochastic. Payment: 0.10 USDC on Base.",
             "x402": PAYMENT_CONFIG
         },
-        "servers": [{"url": "https://price-bot-y95q.onrender.com"}],
+        "servers": [{"url": "https://price-bot-production-4d6a.up.railway.app"}],
         "paths": {
             "/api/data": {
                 "get": {
-                    "summary": "Get trading signal with RSI and MACD",
+                    "summary": "Get trading signal with indicators",
                     "parameters": [
                         {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
-                        {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}},
-                        {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["pretty"]}}
-                    ],
-                    "responses": {
-                        "200": {"description": "Signal with RSI and MACD"},
-                        "402": {"description": "Payment Required"},
-                        "429": {"description": "Rate Limit Exceeded"}
-                    }
+                        {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}}
+                    ]
                 }
             }
         }
@@ -931,41 +654,19 @@ def well_known_x402():
 def mcp_discovery():
     return jsonify({
         "name": "Price Bot",
-        "description": "Data-driven trading signals with RSI, MACD, momentum",
-        "version": "9.4.0",
+        "version": "10.0",
         "x402": {"payment": PAYMENT_CONFIG},
-        "endpoints": [
-            {"path": "/api/data", "method": "GET", "parameters": [{"name": "q", "type": "string", "required": True}], "price": PAYMENT_CONFIG["amount"]}
-        ]
+        "endpoints": [{"path": "/api/data", "method": "GET", "parameters": [{"name": "q", "type": "string"}], "price": PAYMENT_CONFIG["amount"]}]
     })
 
 @app.route('/', methods=['GET'])
 def root():
     return jsonify({
         "status": "ok",
-        "service": "Price Bot v9.4",
-        "description": "Data-driven trading signals with RSI, MACD, momentum",
-        "payment": PAYMENT_CONFIG,
-        "supported": list(REAL_PRICES.keys()),
-        "features": [
-            "rsi", "macd", "momentum", "real_signals",
-            "price_forecasts", "batch_requests", "historical_data",
-            "proof_of_performance", "free_trial", "subscription",
-            "hot_signals", "upsell", "rate_limit",
-            "integrity_verification", "reputation_system",
-            "premium_alerts", "social_proof"
-        ],
-        "endpoints": {
-            "/api/data": "GET with ?q=bitcoin&limit=5",
-            "/api/subscribe": "GET with ?trial=true",
-            "/api/verify": "POST to verify signature",
-            "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
-            "/api/history": "GET with ?q=bitcoin&days=7",
-            "/health": "Service health check",
-            "/openapi.json": "OpenAPI spec",
-            "/.well-known/x402": "x402 discovery",
-            "/.well-known/mcp.json": "MCP discovery"
-        }
+        "service": "Price Bot v10.0",
+        "coins": len(set(COINS.values())),
+        "indicators": ["RSI", "MACD", "Bollinger Bands", "ATR", "Stochastic"],
+        "payment": PAYMENT_CONFIG
     })
 
 if __name__ == '__main__':
