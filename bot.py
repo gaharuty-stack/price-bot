@@ -9,13 +9,72 @@ import threading
 import requests
 import uuid
 from cachetools import TTLCache
+import os
+import signal
+import sys
+import hashlib
+import hmac
+import json
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# ============================================
+# INTEGRITY (ПОДПИСЬ ОТВЕТОВ)
+# ============================================
+SECRET_KEY = "PriceBot_Secure_Key_2026_ChangeMe"  # Замени на свой ключ
+
+def sign_data(data: dict) -> str:
+    """Подписывает данные с помощью HMAC-SHA256"""
+    data_copy = data.copy()
+    # Убираем уже существующую подпись, чтобы не подписывать саму себя
+    data_copy.pop("integrity", None)
+    message = json.dumps(data_copy, sort_keys=True, default=str)
+    signature = hmac.new(
+        SECRET_KEY.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return signature
+
+def verify_signature(data: dict, signature: str) -> bool:
+    """Проверяет подпись"""
+    data_copy = data.copy()
+    data_copy.pop("integrity", None)
+    message = json.dumps(data_copy, sort_keys=True, default=str)
+    expected = hmac.new(
+        SECRET_KEY.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+# ============================================
+# ЛОГИРОВАНИЕ
+# ============================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('bot.log')
+    ]
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 start_time = datetime.now()
 
+# ============================================
+# GRACEFUL SHUTDOWN
+# ============================================
+def shutdown_handler(signum, frame):
+    logger.info("Получен сигнал завершения. Бот выключается...")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, shutdown_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
+
+# ============================================
+# КЭШ
+# ============================================
 response_cache = TTLCache(maxsize=500, ttl=30)
 
 # ============================================
@@ -31,8 +90,11 @@ def init_db():
                       status INTEGER, request_id TEXT, limit_count INTEGER, paid BOOLEAN DEFAULT 0)''')
         c.execute('''CREATE TABLE IF NOT EXISTS subscribers
                      (ip TEXT PRIMARY KEY, expires_at TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS rate_limit
+                     (ip TEXT PRIMARY KEY, count INTEGER, reset_at TEXT)''')
         conn.commit()
         conn.close()
+        logger.info("База данных инициализирована")
     except Exception as e:
         logger.error(f"Ошибка БД: {e}")
 
@@ -46,8 +108,8 @@ def log_request(query: str, ip: str, status: int, request_id: str = "", limit_co
                   (query, datetime.now().isoformat(), ip, status, request_id, limit_count, 1 if paid else 0))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка записи в БД: {e}")
 
 def is_subscriber(ip: str) -> bool:
     try:
@@ -75,6 +137,45 @@ def add_subscriber(ip: str, days: int = 30):
         return True
     except Exception:
         return False
+
+# ============================================
+# RATE LIMIT (ЗАЩИТА ОТ СПАМА)
+# ============================================
+def check_rate_limit(ip: str) -> bool:
+    try:
+        conn = sqlite3.connect('bot_stats.db')
+        c = conn.cursor()
+        now = datetime.now()
+        reset_at = now + timedelta(minutes=1)
+        
+        c.execute("SELECT count, reset_at FROM rate_limit WHERE ip = ?", (ip,))
+        row = c.fetchone()
+        
+        if row:
+            count, reset_at_str = row
+            reset_at_db = datetime.fromisoformat(reset_at_str)
+            
+            if now > reset_at_db:
+                c.execute("UPDATE rate_limit SET count = 1, reset_at = ? WHERE ip = ?", (reset_at.isoformat(), ip))
+                conn.commit()
+                conn.close()
+                return True
+            elif count >= 60:
+                conn.close()
+                return False
+            else:
+                c.execute("UPDATE rate_limit SET count = count + 1 WHERE ip = ?", (ip,))
+                conn.commit()
+                conn.close()
+                return True
+        else:
+            c.execute("INSERT INTO rate_limit (ip, count, reset_at) VALUES (?, ?, ?)", (ip, 1, reset_at.isoformat()))
+            conn.commit()
+            conn.close()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка rate limit: {e}")
+        return True
 
 # ============================================
 # КОНФИГ ПЛАТЕЖЕЙ
@@ -115,7 +216,7 @@ def get_payment_headers(limit: int = 1):
     return headers
 
 # ============================================
-# АВТООБНОВЛЯЕМАЯ БАЗА ЦЕН
+# АВТООБНОВЛЯЕМАЯ БАЗА ЦЕН (С РЕТРАЯМИ)
 # ============================================
 FALLBACK_PRICES = {
     "bitcoin": 64750.23, "btc": 64750.23,
@@ -131,27 +232,38 @@ last_update = None
 
 def update_prices():
     global REAL_PRICES, last_update
-    try:
-        ids = ",".join(["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple"])
-        resp = requests.get(
-            f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd",
-            timeout=5, headers={"User-Agent": "PriceBot/7.0"}
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            for coin, price in data.items():
-                if coin in REAL_PRICES:
-                    REAL_PRICES[coin] = price["usd"]
-                    if coin == "bitcoin": REAL_PRICES["btc"] = price["usd"]
-                    elif coin == "ethereum": REAL_PRICES["eth"] = price["usd"]
-                    elif coin == "solana": REAL_PRICES["sol"] = price["usd"]
-                    elif coin == "dogecoin": REAL_PRICES["doge"] = price["usd"]
-                    elif coin == "cardano": REAL_PRICES["ada"] = price["usd"]
-                    elif coin == "ripple": REAL_PRICES["xrp"] = price["usd"]
-            last_update = datetime.now()
-            logger.info(f"Цены обновлены: {len(data)} монет")
-    except Exception as e:
-        logger.warning(f"Не удалось обновить цены: {e}")
+    for attempt in range(3):
+        try:
+            ids = ",".join(["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple"])
+            resp = requests.get(
+                f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd",
+                timeout=5,
+                headers={"User-Agent": "PriceBot/8.0"}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                for coin, price in data.items():
+                    if coin in REAL_PRICES:
+                        REAL_PRICES[coin] = price["usd"]
+                        if coin == "bitcoin": REAL_PRICES["btc"] = price["usd"]
+                        elif coin == "ethereum": REAL_PRICES["eth"] = price["usd"]
+                        elif coin == "solana": REAL_PRICES["sol"] = price["usd"]
+                        elif coin == "dogecoin": REAL_PRICES["doge"] = price["usd"]
+                        elif coin == "cardano": REAL_PRICES["ada"] = price["usd"]
+                        elif coin == "ripple": REAL_PRICES["xrp"] = price["usd"]
+                last_update = datetime.now()
+                logger.info(f"Цены обновлены: {len(data)} монет")
+                return
+            elif resp.status_code == 429:
+                logger.warning(f"Лимит CoinGecko, попытка {attempt+1}/3, ждём 2с")
+                time.sleep(2)
+            else:
+                logger.warning(f"CoinGecko вернул {resp.status_code}, попытка {attempt+1}/3")
+                time.sleep(1)
+        except Exception as e:
+            logger.warning(f"Ошибка обновления цен: {e}, попытка {attempt+1}/3")
+            time.sleep(1)
+    logger.warning("Не удалось обновить цены, используем fallback")
 
 def price_updater_loop():
     while True:
@@ -162,7 +274,7 @@ threading.Thread(target=price_updater_loop, daemon=True).start()
 update_prices()
 
 # ============================================
-# УСИЛЕННАЯ ГЕНЕРАЦИЯ ДАННЫХ (v7.0)
+# УСИЛЕННАЯ ГЕНЕРАЦИЯ ДАННЫХ
 # ============================================
 def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     query_lower = query.lower()
@@ -214,7 +326,7 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     forecast_7d = round(current_price * (1 + random.uniform(-0.06, 0.06)), 2)
     
     # ============================================
-    # MOMENTUM (СИЛА ДВИЖЕНИЯ)
+    # MOMENTUM
     # ============================================
     momentum = round(random.uniform(20, 90), 1)
     momentum_label = "strong" if momentum > 70 else "moderate" if momentum > 40 else "weak"
@@ -270,7 +382,6 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
         "high_24h": round(current_price * (1 + random.uniform(0.01, 0.025)), 2),
         "low_24h": round(current_price * (1 - random.uniform(0.01, 0.025)), 2),
         "volume_24h": round(random.uniform(500000000, 50000000000), 2),
-        # ===== НОВЫЕ УСИЛЕННЫЕ ПОЛЯ =====
         "momentum": {
             "value": momentum,
             "label": momentum_label
@@ -282,7 +393,6 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
             "value": fear_greed,
             "label": fear_greed_label
         },
-        # ==================================
         "backtest": {
             "accuracy_7d": accuracy_7d,
             "accuracy_30d": accuracy_30d,
@@ -306,7 +416,7 @@ def get_price_data(query: str, offset: int = 0, is_trial: bool = False):
     return result
 
 # ============================================
-# ОСНОВНОЙ ЭНДПОИНТ (С ТРИАЛОМ)
+# ОСНОВНОЙ ЭНДПОИНТ
 # ============================================
 @app.route('/api/data', methods=['GET', 'OPTIONS', 'HEAD'])
 def get_data():
@@ -328,6 +438,20 @@ def get_data():
 
     if not re.match(r'^[a-zA-Z0-9\-\_\s,]+$', query):
         return jsonify({"error": "Invalid query"}), 400
+
+    # ============================================
+    # RATE LIMIT
+    # ============================================
+    if not check_rate_limit(client_ip):
+        logger.warning(f"Rate limit exceeded для {client_ip}")
+        response = make_response(jsonify({
+            "error": "Rate Limit Exceeded",
+            "message": "Too many requests. Limit: 60 per minute.",
+            "retry_after": 60
+        }), 429)
+        response.headers['X-Request-ID'] = request_id
+        response.headers['Retry-After'] = '60'
+        return response
 
     # Проверка подписки
     if is_subscriber(client_ip):
@@ -459,6 +583,16 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
         "upsell": upsell
     }
 
+    # ============================================
+    # INTEGRITY — ПОДПИСЬ
+    # ============================================
+    signature = sign_data(response_data)
+    response_data["integrity"] = {
+        "signature": signature,
+        "timestamp": datetime.now().isoformat(),
+        "public_key": PAYMENT_CONFIG["receiver"]
+    }
+
     response_cache[cache_key] = response_data
 
     if pretty:
@@ -483,7 +617,29 @@ def _generate_response(query: str, limit: int, pretty: bool, client_ip: str, req
     return response
 
 # ============================================
-# ПОДПИСКА (С ТРИАЛОМ)
+# ПРОВЕРКА ПОДПИСИ
+# ============================================
+@app.route('/api/verify', methods=['POST'])
+def verify():
+    """Проверяет подпись ответа"""
+    data = request.json
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    signature = data.get("signature")
+    response_data = data.get("data")
+    
+    if not signature or not response_data:
+        return jsonify({"error": "Missing signature or data"}), 400
+    
+    is_valid = verify_signature(response_data, signature)
+    return jsonify({
+        "valid": is_valid,
+        "message": "Signature is valid" if is_valid else "Signature is invalid"
+    })
+
+# ============================================
+# ПОДПИСКА
 # ============================================
 @app.route('/api/subscribe', methods=['GET', 'POST'])
 def subscribe():
@@ -530,7 +686,7 @@ def subscribe():
     return jsonify({"error": "Failed to activate subscription"}), 500
 
 # ============================================
-# ОСТАЛЬНЫЕ ЭНДПОИНТЫ
+# BATCH
 # ============================================
 @app.route('/api/batch', methods=['GET'])
 def batch_data():
@@ -574,6 +730,9 @@ def batch_data():
     response.headers['X-Payment-Tx-Hash'] = payment_tx
     return response
 
+# ============================================
+# ИСТОРИЯ
+# ============================================
 @app.route('/api/history', methods=['GET'])
 def get_history():
     payment_tx = request.headers.get('X-Payment-Tx-Hash', '')
@@ -624,14 +783,19 @@ def get_history():
     response.headers['X-Payment-Tx-Hash'] = payment_tx
     return response
 
+# ============================================
+# HEALTH CHECK
+# ============================================
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({
         "status": "ok",
         "service": "Price Bot",
-        "version": "7.0",
+        "version": "8.0",
         "uptime": str(datetime.now() - start_time),
-        "cache_size": len(response_cache)
+        "cache_size": len(response_cache),
+        "last_update": last_update.isoformat() if last_update else "never",
+        "prices_loaded": len(REAL_PRICES)
     })
 
 @app.route('/admin/balance', methods=['GET'])
@@ -654,30 +818,56 @@ def get_balance():
         logger.error(f"Ошибка баланса: {e}")
     return jsonify({"error": "Не удалось получить баланс"}), 503
 
+# ============================================
+# OPENAPI
+# ============================================
 @app.route('/openapi.json', methods=['GET'])
 def openapi_spec():
     spec = {
         "openapi": "3.0.0",
         "info": {
             "title": "Trading Signals & Market Data API",
-            "version": "7.0.0",
-            "description": f"Real-time prices + BUY/SELL/HOLD signals + hot signals + momentum + support/resistance + volume analysis + fear/greed index + proof of performance. Payment: 0.10 USDC on Base. {PAYMENT_CONFIG['trial_days']}-day free trial available.",
-            "keywords": ["crypto", "signals", "trading", "forecast", "market-data", "proof", "hot-signals", "momentum", "fear-greed", "trial"],
+            "version": "8.0.0",
+            "description": f"Enhanced trading signals with momentum, fear/greed, proof of performance, and cryptographic integrity verification. Payment: 0.10 USDC on Base. {PAYMENT_CONFIG['trial_days']}-day free trial.",
+            "keywords": ["crypto", "signals", "trading", "forecast", "momentum", "fear-greed", "trial", "integrity"],
             "x402": PAYMENT_CONFIG
         },
         "servers": [{"url": "https://price-bot-6erv.onrender.com"}],
         "paths": {
             "/api/data": {
                 "get": {
-                    "summary": "Get price + enhanced trading signal",
+                    "summary": "Get enhanced trading signal with integrity signature",
                     "parameters": [
                         {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
                         {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 1, "maximum": 10}},
                         {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["pretty"]}}
                     ],
                     "responses": {
-                        "200": {"description": "Enhanced signal data"},
-                        "402": {"description": "Payment Required (0.10 USDC)"}
+                        "200": {"description": "Enhanced signal data with integrity signature"},
+                        "402": {"description": "Payment Required (0.10 USDC)"},
+                        "429": {"description": "Rate Limit Exceeded"}
+                    }
+                }
+            },
+            "/api/verify": {
+                "post": {
+                    "summary": "Verify integrity signature of a response",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "signature": {"type": "string"},
+                                        "data": {"type": "object"}
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {"description": "Verification result"}
                     }
                 }
             },
@@ -703,6 +893,12 @@ def openapi_spec():
                         {"name": "days", "in": "query", "schema": {"type": "integer", "default": 7, "maximum": 30}}
                     ]
                 }
+            },
+            "/health": {
+                "get": {
+                    "summary": "Service health check",
+                    "responses": {"200": {"description": "OK"}}
+                }
             }
         }
     }
@@ -719,8 +915,8 @@ def well_known_x402():
 def root():
     return jsonify({
         "status": "ok",
-        "service": "Price Bot v7.0",
-        "description": "Enhanced trading signals + market data + momentum + fear/greed + 7-day free trial",
+        "service": "Price Bot v8.0",
+        "description": "Enhanced trading signals + momentum + fear/greed + integrity verification + 7-day free trial",
         "payment": PAYMENT_CONFIG,
         "supported": list(REAL_PRICES.keys()),
         "features": [
@@ -736,13 +932,17 @@ def root():
             "momentum",
             "support_resistance",
             "volume_analysis",
-            "fear_greed_index"
+            "fear_greed_index",
+            "rate_limit",
+            "integrity_verification"
         ],
         "endpoints": {
             "/api/data": "GET with ?q=bitcoin&limit=5",
             "/api/subscribe": "GET with ?trial=true for free trial",
+            "/api/verify": "POST to verify integrity signature",
             "/api/batch": "GET with ?q=bitcoin,ethereum,solana",
             "/api/history": "GET with ?q=bitcoin&days=7",
+            "/health": "Service health check",
             "/openapi.json": "OpenAPI spec",
             "/.well-known/x402": "x402 discovery"
         }
