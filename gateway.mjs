@@ -18,32 +18,35 @@ const resourceServer = new x402ResourceServer(facilitator).register(NETWORK, new
 const app = express();
 const proxy = createProxyMiddleware({ target: FLASK_TARGET, changeOrigin: true });
 
-app.get("/", proxy);
-app.get("/health", proxy);
-app.get("/api/coins", proxy);
-app.get("/openapi.json", proxy);
-app.get("/.well-known/x402", proxy);
-app.get("/.well-known/mcp.json", proxy);
-app.get("/llms.txt", proxy);
-app.get("/ai.txt", proxy);
-app.get("/robots.txt", proxy);
+const freeRoutes = [
+  "/",
+  "/health",
+  "/api/coins",
+  "/api/preview",
+  "/openapi.json",
+  "/.well-known/x402",
+  "/.well-known/mcp.json",
+  "/llms.txt",
+  "/ai.txt",
+  "/robots.txt",
+];
+
+for (const route of freeRoutes) {
+  app.get(route, proxy);
+}
+
+const paidRoute = (path, description) => ({
+  [`GET ${path}`]: {
+    accepts: [{ scheme: "exact", price: PRICE_LABEL, network: NETWORK, payTo: PAY_TO }],
+    description,
+    mimeType: "application/json",
+  },
+});
 
 app.use(paymentMiddleware({
-  "GET /api/data": {
-    accepts: [{ scheme: "exact", price: PRICE_LABEL, network: NETWORK, payTo: PAY_TO }],
-    description: "Crypto brief for one coin",
-    mimeType: "application/json",
-  },
-  "GET /api/compare": {
-    accepts: [{ scheme: "exact", price: PRICE_LABEL, network: NETWORK, payTo: PAY_TO }],
-    description: "Compare 2-5 coins",
-    mimeType: "application/json",
-  },
-  "GET /api/trending": {
-    accepts: [{ scheme: "exact", price: PRICE_LABEL, network: NETWORK, payTo: PAY_TO }],
-    description: "Top gainers and losers",
-    mimeType: "application/json",
-  },
+  ...paidRoute("/api/data", "LLM-ready crypto brief for one coin (?format=agent)"),
+  ...paidRoute("/api/compare", "Compare 2-5 coins in one request"),
+  ...paidRoute("/api/trending", "Top gainers and losers (24h)"),
 }, resourceServer));
 
 app.get("/api/data", proxy);
@@ -51,5 +54,5 @@ app.get("/api/compare", proxy);
 app.get("/api/trending", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("x402 gateway v12 on :" + PORT + " price=" + PRICE_LABEL);
+  console.log(`x402 gateway v13 on :${PORT} price=${PRICE_LABEL}`);
 });

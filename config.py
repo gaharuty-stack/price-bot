@@ -20,6 +20,7 @@ COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "")
 
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "60"))
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "120"))
+PREVIEW_RATE_LIMIT_PER_MINUTE = int(os.environ.get("PREVIEW_RATE_LIMIT_PER_MINUTE", "30"))
 
 COINS = {
     "bitcoin": "bitcoin", "btc": "bitcoin",
@@ -43,6 +44,27 @@ COINS = {
     "algorand": "algorand", "algo": "algorand",
     "vechain": "vechain", "vet": "vechain",
     "tezos": "tezos", "xtz": "tezos",
+    "pepe": "pepe",
+    "sui": "sui",
+    "arbitrum": "arbitrum", "arb": "arbitrum",
+    "optimism": "optimism", "op": "optimism",
+    "aptos": "aptos", "apt": "aptos",
+    "internet-computer": "internet-computer", "icp": "internet-computer",
+    "binancecoin": "binancecoin", "bnb": "binancecoin",
+    "tron": "tron", "trx": "tron",
+    "the-open-network": "the-open-network", "ton": "the-open-network",
+    "render": "render-token", "render-token": "render-token",
+    "injective": "injective-protocol", "inj": "injective-protocol",
+    "aave": "aave",
+    "maker": "maker", "mkr": "maker",
+    "cronos": "crypto-com-chain", "cro": "crypto-com-chain",
+    "hedera": "hedera-hashgraph", "hbar": "hedera-hashgraph",
+    "fetch": "fetch-ai", "fet": "fetch-ai",
+    "bonk": "bonk",
+    "sei": "sei-network",
+    "celestia": "celestia", "tia": "celestia",
+    "stacks": "blockstack", "stx": "blockstack",
+    "immutable": "immutable-x", "imx": "immutable-x",
 }
 
 SERVICE_URL = os.environ.get(
@@ -50,5 +72,5 @@ SERVICE_URL = os.environ.get(
     "https://price-bot-production-4d6a.up.railway.app",
 )
 
-VERSION = "12.0.0"
+VERSION = "13.0.0"
 MAX_COMPARE_COINS = 5

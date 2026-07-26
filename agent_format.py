@@ -57,3 +57,23 @@ def build_agent_brief(data: dict) -> dict:
         "target_price": data["target_price"],
         "stop_loss": data["stop_loss"],
     }
+
+
+def build_preview_brief(data: dict, query: str, service_url: str, price: str) -> dict:
+    brief = build_agent_brief(data)
+    return {
+        "status": "preview",
+        "query": query,
+        "data": {
+            "coin": brief["coin"],
+            "price_usd": brief["price_usd"],
+            "change_24h": brief["change_24h"],
+            "signal": brief["signal"],
+            "reason": brief["reason"],
+        },
+        "upgrade": {
+            "endpoint": f"{service_url}/api/data?q={query}&format=agent",
+            "price": f"{price} USDC",
+            "includes": ["action_hint", "confidence", "target_price", "stop_loss", "full indicators"],
+        },
+    }

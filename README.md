@@ -21,7 +21,15 @@ Pay per call via **x402 / USDC on Base** (PayAI facilitator).
 | `GET /api/data?q=btc&format=agent` | **$0.001 USDC** |
 | `GET /api/compare?coins=btc,eth,sol&format=agent` | **$0.001 USDC** |
 | `GET /api/trending` | **$0.001 USDC** |
-| `/api/coins`, `/health`, `/llms.txt`, `/.well-known/x402` | Free |
+| `/api/coins`, `/api/preview`, `/health`, `/llms.txt`, `/.well-known/x402` | Free |
+
+## Example: free preview
+
+```
+GET /api/preview?q=btc
+```
+
+Returns price, signal, reason — no `action_hint` or targets. Includes upgrade URL to paid brief.
 
 ## Example: agent brief (paid)
 
@@ -66,14 +74,15 @@ Returns top 5 gainers and losers from supported coins (24h).
 
 ```
 GET /api/coins
+GET /api/preview?q=btc
 GET /health
 GET /llms.txt
 GET /.well-known/x402
 ```
 
-## Supported coins (21)
+## Supported coins (40+)
 
-BTC, ETH, SOL, DOGE, ADA, XRP, DOT, LINK, MATIC, LTC, AVAX, SHIB, UNI, ATOM, FIL, NEAR, ALGO, VET, XTZ, XLM, XMR
+BTC, ETH, SOL, BNB, XRP, ADA, DOGE, AVAX, DOT, LINK, MATIC, LTC, SHIB, UNI, ATOM, NEAR, APT, ARB, OP, SUI, TON, TRX, PEPE, BONK, INJ, TIA, SEI, ICP, AAVE, MKR, FET, IMX, STX, HBAR, CRO, FIL, ALGO, VET, XTZ, XLM, XMR, and more — see `/api/coins`
 
 ## For AI agents
 

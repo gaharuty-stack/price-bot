@@ -7,8 +7,8 @@ from datetime import datetime
 from cachetools import TTLCache
 from flask import Flask, jsonify, make_response, request
 
-from agent_format import build_agent_brief
-from config import COINS, MAX_COMPARE_COINS, PAYMENT, RATE_LIMIT_PER_MINUTE, SERVICE_URL, VERSION
+from agent_format import build_agent_brief, build_preview_brief
+from config import COINS, MAX_COMPARE_COINS, PAYMENT, PREVIEW_RATE_LIMIT_PER_MINUTE, RATE_LIMIT_PER_MINUTE, SERVICE_URL, VERSION
 from db import check_rate_limit, get_stats, init_db, log_request
 from integrity import sign_data
 from market_data import get_coin_data, get_last_snapshot_at, get_trending, resolve_coin_id, start_price_updater
@@ -133,6 +133,37 @@ def list_coins():
         "count": len(unique),
         "coins": [{"id": c, "aliases": sorted(set(aliases.get(c, [c])))} for c in unique],
     })
+
+
+@app.route("/api/preview", methods=["GET"])
+def preview_data():
+    started = time.perf_counter()
+    ip = _client_ip()
+    if not check_rate_limit(f"preview:{ip}", PREVIEW_RATE_LIMIT_PER_MINUTE):
+        return jsonify({"error": "rate_limit_exceeded", "retry_after_seconds": 60}), 429
+
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "missing_parameter", "message": "Use ?q=btc"}), 400
+    if not resolve_coin_id(query):
+        return jsonify({"error": "unknown_coin", "message": f"Unsupported coin: {query}"}), 404
+
+    cache_key = f"preview:{query.lower()}"
+    if cache_key not in response_cache:
+        try:
+            result = build_coin_response(query)
+        except ValueError as exc:
+            return jsonify({"error": "unknown_coin", "message": str(exc)}), 404
+        except Exception as exc:
+            logger.exception("Preview failed for %s", query)
+            return jsonify({"error": "upstream_unavailable", "message": str(exc)}), 503
+
+        response_cache[cache_key] = build_preview_brief(
+            result, query, SERVICE_URL, PAYMENT["amount"]
+        )
+
+    _track_response(started)
+    return jsonify(response_cache[cache_key])
 
 
 @app.route("/api/data", methods=["GET"])
@@ -301,6 +332,15 @@ def _openapi_paths():
             }
         },
         "/api/coins": {"get": {"summary": "List supported coins (free)", "operationId": "listCoins"}},
+        "/api/preview": {
+            "get": {
+                "summary": "Free taste of agent brief (no action_hint / targets)",
+                "parameters": [
+                    {"name": "q", "in": "query", "required": True, "schema": {"type": "string", "example": "btc"}},
+                ],
+                "responses": {"200": {"description": "Preview brief with upgrade hint"}},
+            }
+        },
     }
 
 
@@ -331,6 +371,7 @@ def mcp_discovery():
         "description": "LLM-ready crypto price + TA briefs. Use ?format=agent for concise answers.",
         "x402": PAYMENT,
         "endpoints": [
+            {"path": "/api/preview", "method": "GET", "price": "0", "example": f"{SERVICE_URL}/api/preview?q=btc"},
             {"path": "/api/data", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/api/data?q=btc&format=agent"},
             {"path": "/api/compare", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/api/compare?coins=btc,eth,sol&format=agent"},
             {"path": "/api/trending", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/api/trending"},
@@ -347,11 +388,13 @@ def llms_txt():
 > LLM-ready crypto price + TA briefs. Pay per call via x402 USDC on Base.
 
 ## When to use
+- Try before you pay → GET /api/preview?q=btc (free)
 - Need a concise trading brief for one coin → GET /api/data?q=btc&format=agent
 - Compare multiple coins in one call → GET /api/compare?coins=btc,eth,sol&format=agent
 - Find top movers → GET /api/trending
 
 ## Pricing
+- Free preview: /api/preview?q=btc — signal + reason, no action_hint
 - Paid: /api/data, /api/compare, /api/trending — {PAYMENT['amount']} USDC each
 - Free: /api/coins, /health, /.well-known/x402
 
@@ -389,10 +432,11 @@ def root():
         "coins_supported": len(set(COINS.values())),
         "payment": PAYMENT,
         "endpoints": {
-            "free": ["/health", "/api/coins", "/llms.txt", "/.well-known/x402"],
+            "free": ["/health", "/api/coins", "/api/preview", "/llms.txt", "/.well-known/x402"],
             "paid": ["/api/data", "/api/compare", "/api/trending"],
         },
         "examples": {
+            "preview": "/api/preview?q=btc",
             "agent_brief": "/api/data?q=btc&format=agent",
             "compare": "/api/compare?coins=btc,eth,sol&format=agent",
             "trending": "/api/trending",
