@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /.well-known/
+Allow: /api/coins
+Allow: /openapi.json
+
+# Paid API for agents
+# GET /api/data?q=bitcoin — $0.001 USDC via x402
+
+Sitemap: https://price-bot-production-4d6a.up.railway.app/openapi.json

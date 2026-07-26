@@ -1,0 +1,17 @@
+{
+  "price": "$0.001",
+  "payTo": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915",
+  "network": "base",
+  "mode": "bots",
+  "pow": false,
+  "freePaths": [
+    "/",
+    "/health",
+    "/openapi.json",
+    "/.well-known/x402",
+    "/.well-known/mcp.json",
+    "/api/coins",
+    "/robots.txt",
+    "/ai.txt"
+  ]
+}

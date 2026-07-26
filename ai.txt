@@ -1,0 +1,14 @@
+# ai.txt — machine-readable service description for AI agents
+
+service: Crypto Price & TA API
+version: 11.0.0
+payment: x402 USDC on Base
+price: $0.001 per /api/data request
+discovery: /.well-known/x402, /.well-known/mcp.json, /openapi.json
+free_endpoints: /, /health, /api/coins
+paid_endpoint: GET /api/data?q={coin}
+example: /api/data?q=bitcoin
+coins: 25 (btc, eth, sol, doge, ada, xrp, dot, link, matic, ltc, avax, shib, uni, atom, fil, near, algo, vet, xtz, ...)
+data_source: coingecko
+indicators: RSI, MACD, Bollinger Bands, ATR, Stochastic
+contact: https://github.com/gaharuty-stack/price-bot
