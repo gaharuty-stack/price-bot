@@ -15,7 +15,7 @@ Monetized via [x402](https://www.x402.org/) / USDC on Base through [agent402-tol
 
 | Endpoint | Price |
 |----------|-------|
-| `GET /api/data?q=bitcoin` | **$0.001 USDC** per request (Base mainnet, x402) |
+| `GET /api/data?q=bitcoin` | **$0.01 USDC** per request (Base mainnet, x402) |
 | `GET /api/coins` | Free (discovery) |
 | `GET /`, `/health`, `/.well-known/x402` | Free (discovery) |
 
@@ -47,7 +47,7 @@ INTEGRITY_SECRET=your-long-random-secret
 TOLLBOOTH_SECRET=another-long-random-secret
 ADMIN_TOKEN=admin-stats-token
 PAY_TO=0xYourWalletAddress
-PRICE_USDC=0.001
+PRICE_USDC=0.01
 SERVICE_URL=https://your-app.up.railway.app
 COINGECKO_API_KEY=optional-demo-api-key
 ```
@@ -91,7 +91,7 @@ Use `/api/coins` for the full list with aliases.
 |---------------|-----------|
 | PoW enabled → agents paid with CPU, not USDC | Real x402 gateway with on-chain USDC settlement |
 | No verifyX402 in tollbooth | `@x402/express` + facilitator |
-| $0.10/request too expensive | $0.001 — volume-friendly |
+| $0.10/request too expensive | $0.01 — volume-friendly |
 | Fake backtest, reputation, social proof | Removed — real CoinGecko data only |
 | Double payment gate (tollbooth + bot 402) | Bot serves data; gateway handles payment only |
 | No README / discovery | OpenAPI, MCP, ai.txt, this README |
