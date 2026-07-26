@@ -55,7 +55,7 @@ def update_price_snapshot() -> None:
 def _price_updater_loop() -> None:
     while True:
         update_price_snapshot()
-        time.sleep(300)
+        time.sleep(600)
 
 
 def start_price_updater() -> None:
@@ -85,6 +85,39 @@ def get_ohlc(coin_id: str, days: int = 30) -> list[list[float]]:
     return ohlc
 
 
+def get_last_snapshot_at() -> str | None:
+    if _last_snapshot_update:
+        return _last_snapshot_update.isoformat() + "Z"
+    return None
+
+
+def get_trending(limit: int = 10) -> dict:
+    snapshot = _snapshot_cache.get("snapshot", {})
+    if not snapshot:
+        return {"gainers": [], "losers": []}
+
+    id_to_alias = {}
+    for alias, coin_id in COINS.items():
+        if len(alias) <= 5:
+            id_to_alias.setdefault(coin_id, alias.upper())
+
+    rows = []
+    for coin_id, data in snapshot.items():
+        change = float(data.get("usd_24h_change", 0))
+        rows.append({
+            "coin_id": coin_id,
+            "ticker": id_to_alias.get(coin_id, coin_id.split("-")[0].upper()),
+            "price_usd": round(float(data["usd"]), 2),
+            "change_24h_percent": round(change, 2),
+            "volume_24h": round(float(data.get("usd_24h_vol", 0)), 2),
+        })
+
+    sorted_rows = sorted(rows, key=lambda r: r["change_24h_percent"], reverse=True)
+    gainers = sorted_rows[:limit]
+    losers = list(reversed(sorted_rows[-limit:]))
+    return {"gainers": gainers, "losers": losers}
+
+
 def get_coin_data(query: str) -> dict | None:
     coin_id = resolve_coin_id(query)
     if not coin_id:
@@ -101,8 +134,17 @@ def get_coin_data(query: str) -> dict | None:
         ohlc = []
 
     closes = [row[3] for row in ohlc] if ohlc else []
+    ticker = query.strip().lower()
+    for alias, cid in COINS.items():
+        if cid == coin_id and len(alias) <= 5:
+            ticker = alias.upper()
+            break
+    else:
+        ticker = coin_id.split("-")[0].upper()
+
     return {
         "coin_id": coin_id,
+        "ticker": ticker,
         "name": query.strip().title(),
         "price_usd": round(float(snapshot["usd"]), 2),
         "change_24h_percent": round(float(snapshot.get("usd_24h_change", 0)), 2),

@@ -9,6 +9,10 @@ PAYMENT = {
     "currency": "USDC",
     "network": os.environ.get("PAYMENT_NETWORK", "base"),
     "receiver": PAY_TO,
+    "facilitator": os.environ.get(
+        "X402_FACILITATOR_URL",
+        "https://facilitator.payai.network",
+    ),
 }
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
@@ -45,3 +49,6 @@ SERVICE_URL = os.environ.get(
     "SERVICE_URL",
     "https://price-bot-production-4d6a.up.railway.app",
 )
+
+VERSION = "12.0.0"
+MAX_COMPARE_COINS = 5
