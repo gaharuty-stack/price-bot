@@ -18,9 +18,14 @@ const resourceServer = new x402ResourceServer(facilitator).register(NETWORK, new
 const app = express();
 const proxy = createProxyMiddleware({ target: FLASK_TARGET, changeOrigin: true });
 
-for (const path of ["/", "/health", "/api/coins", "/openapi.json", "/.well-known/x402", "/.well-known/mcp.json", "/ai.txt", "/robots.txt"]) {
-  app.use(path, proxy);
-}
+app.get("/", proxy);
+app.get("/health", proxy);
+app.get("/api/coins", proxy);
+app.get("/openapi.json", proxy);
+app.get("/.well-known/x402", proxy);
+app.get("/.well-known/mcp.json", proxy);
+app.get("/ai.txt", proxy);
+app.get("/robots.txt", proxy);
 
 app.use(paymentMiddleware({
   "GET /api/data": {
@@ -30,7 +35,7 @@ app.use(paymentMiddleware({
   },
 }, resourceServer));
 
-app.use("/api/data", proxy);
+app.get("/api/data", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`x402 gateway on :${PORT}`);
