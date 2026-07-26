@@ -51,6 +51,12 @@ PRICE_USDC=0.01
 SERVICE_URL=https://your-app.up.railway.app
 COINGECKO_API_KEY=optional-demo-api-key
 ```
+## Live API
+
+- Health: https://price-bot-production-4d6a.up.railway.app/health
+- Coins: https://price-bot-production-4d6a.up.railway.app/api/coins
+- Data: https://price-bot-production-4d6a.up.railway.app/api/data?q=bitcoin ($0.01 USDC via x402)
+- x402: https://price-bot-production-4d6a.up.railway.app/.well-known/x402
 
 2. Deploy with Docker — x402 gateway starts on `PORT` (default 10000), Flask on internal `:5000`.
 
