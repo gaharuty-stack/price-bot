@@ -16,7 +16,5 @@ RUN npm install --omit=dev
 
 COPY *.py ./
 COPY ai.txt robots.txt ./
-COPY entrypoint.sh ./
-RUN chmod +x entrypoint.sh
 
-CMD ["./entrypoint.sh"]
+CMD ["bash", "-c", "python bot.py & sleep 5 && exec node gateway.mjs"]
