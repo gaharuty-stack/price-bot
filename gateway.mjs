@@ -36,6 +36,8 @@ const freeRoutes = [
   "/llms.txt",
   "/ai.txt",
   "/robots.txt",
+  "/favicon.ico",
+  "/favicon.svg",
 ];
 
 for (const route of freeRoutes) {

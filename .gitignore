@@ -1,0 +1,13 @@
+# secrets / local
+.env
+*.pyc
+__pycache__/
+bot_stats.db
+
+# deps
+node_modules/
+gateway/node_modules/
+
+# promo local
+promo_targets.json
+promo_outbox/

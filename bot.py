@@ -327,16 +327,14 @@ def admin_stats():
 
 def _payment_info():
     """AgentCash / IETF payment discovery block (decimal USD amount)."""
+    # Only x402 — empty mpp fields trigger L2_MPP_MALFORMED in AgentCash audit.
     return {
         "price": {
             "mode": "fixed",
             "currency": "USD",
             "amount": f"{float(PAYMENT['amount']):.6f}",
         },
-        "protocols": [
-            {"x402": {}},
-            {"mpp": {"method": "", "intent": "", "currency": ""}},
-        ],
+        "protocols": [{"x402": {}}],
     }
 
 
@@ -358,6 +356,8 @@ def _openapi_paths():
             "action_hint": {"type": "string"},
         },
     }
+    # security: [] => AgentCash authMode "unprotected"
+    free_security = []
     return {
         "/api/data": {
             "get": {
@@ -442,6 +442,7 @@ def _openapi_paths():
                 "operationId": "listCoins",
                 "summary": "List supported coins (free)",
                 "tags": ["Search"],
+                "security": free_security,
                 "responses": {"200": {"description": "Supported coin ids"}},
             }
         },
@@ -450,6 +451,7 @@ def _openapi_paths():
                 "operationId": "previewBrief",
                 "summary": "Free taste of agent brief (no action_hint / targets)",
                 "tags": ["Search"],
+                "security": free_security,
                 "parameters": [
                     {
                         "name": "q",
@@ -462,6 +464,18 @@ def _openapi_paths():
             }
         },
     }
+
+
+@app.route("/favicon.ico", methods=["GET"])
+@app.route("/favicon.svg", methods=["GET"])
+def favicon():
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+        '<rect width="64" height="64" rx="12" fill="#0f172a"/>'
+        '<text x="32" y="42" text-anchor="middle" font-size="28" fill="#22c55e"'
+        ' font-family="Arial,sans-serif">$</text></svg>'
+    )
+    return make_response(svg, 200, {"Content-Type": "image/svg+xml; charset=utf-8"})
 
 
 @app.route("/openapi.json", methods=["GET"])
@@ -482,10 +496,16 @@ def openapi_spec():
             f"Price per paid call: {PAYMENT['amount']} USDC."
         ),
         "x402": PAYMENT,
+        "contact": {
+            "url": os.environ.get(
+                "CONTACT_URL",
+                "https://github.com/gaharuty-stack/price-bot",
+            ).strip(),
+        },
     }
     contact_email = os.environ.get("CONTACT_EMAIL", "").strip()
     if contact_email:
-        info["contact"] = {"email": contact_email}
+        info["contact"]["email"] = contact_email
 
     return jsonify({
         "openapi": "3.1.0",
