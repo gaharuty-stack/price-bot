@@ -1,47 +1,42 @@
 # Crypto Agent Brief API
 
-LLM-ready crypto price + TA briefs for AI agents.
-Pay per call via **x402 / USDC on Base** (PayAI facilitator).
+Cheap x402 crypto intelligence for AI agents — not raw CoinGecko dumps.  
+One call: **price + BUY/SELL/HOLD + support/resistance + regime + risk + invalidation**.
 
-**Live:** https://price-bot-production-4d6a.up.railway.app
+**Live:** https://price-bot-production-4d6a.up.railway.app  
+**Free preview:** https://price-bot-production-4d6a.up.railway.app/api/preview?q=btc  
+**Agent docs:** https://price-bot-production-4d6a.up.railway.app/llms.txt  
+**OpenAPI:** https://price-bot-production-4d6a.up.railway.app/openapi.json
 
-## Status (v13.1)
-
-Hardening release:
-- non-blocking CoinGecko boot (no healthcheck stalls)
-- shorter upstream timeouts (fail fast instead of 15s+ hangs)
-- OHLC warm cache for hot coins
-- gateway proxy timeout 20s
-- `/health` now counts free traffic too (was stuck at 0)
-
-## Why agents use this (not raw CoinGecko)
-
-| Raw API | This API |
-|---------|----------|
-| 15 fields of JSON | 1 concise brief with `reason` + `action_hint` |
-| 1 coin per call | Compare 5 coins in 1 call |
-| No signal context | BUY/SELL/HOLD + confidence |
-| Free but verbose | $0.01 — saves agent tokens & round-trips |
-
-## Pricing
+## Pricing (v13.3)
 
 | Endpoint | Price |
 |----------|-------|
-| `GET /api/data?q=btc&format=agent` | **$0.01 USDC** |
-| `GET /api/compare?coins=btc,eth,sol&format=agent` | **$0.01 USDC** |
+| `GET /api/preview?q=btc` | **Free** |
+| `GET /api/data?q=btc` | **$0.01 USDC** |
+| `GET /api/compare?coins=btc,eth,sol` | **$0.01 USDC** (up to 5 coins) |
 | `GET /api/trending` | **$0.01 USDC** |
-| `/api/coins`, `/api/preview`, `/health`, `/llms.txt`, `/.well-known/x402` | Free |
+| `/api/coins`, `/health`, `/llms.txt`, `/.well-known/x402` | Free |
 
-## Example: free preview
+Network: **Base**. Facilitator: **PayAI**. Default response format: **agent**.
 
+## Why unique
+
+| Typical API | This API |
+|-------------|---------|
+| Price only / huge JSON | Compact agent pack |
+| No invalidation | `levels` + `invalidation` line |
+| 1 coin / expensive essay | Compare 5 coins for $0.01 + vs-BTC strength |
+| API keys | x402 pay-per-call |
+
+## Quick start
+
+```bash
+curl "https://price-bot-production-4d6a.up.railway.app/api/preview?q=btc"
+curl "https://price-bot-production-4d6a.up.railway.app/llms.txt"
 ```
-GET /api/preview?q=btc
-```
 
-## For AI agents
-
-Read `/llms.txt` first. Use `?format=agent` for token-efficient responses.
-Pay via x402 USDC on Base — no API keys needed.
+Paid routes return **HTTP 402** until settled via x402 USDC on Base.
 
 ## Disclaimer
 

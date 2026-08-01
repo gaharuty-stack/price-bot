@@ -1,5 +1,5 @@
 {
-  "price": "$0.001",
+  "price": "$0.01",
   "payTo": "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915",
   "network": "base",
   "mode": "bots",
@@ -11,7 +11,11 @@
     "/.well-known/x402",
     "/.well-known/mcp.json",
     "/api/coins",
+    "/api/preview",
     "/robots.txt",
-    "/ai.txt"
+    "/ai.txt",
+    "/llms.txt",
+    "/favicon.ico",
+    "/favicon.svg"
   ]
 }

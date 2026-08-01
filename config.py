@@ -5,7 +5,7 @@ PAY_TO = os.environ.get("PAY_TO", "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 PAYMENT = {
-    "amount": os.environ.get("PRICE_USDC", "0.001"),
+    "amount": os.environ.get("PRICE_USDC", "0.01"),
     "currency": "USDC",
     "network": os.environ.get("PAYMENT_NETWORK", "base"),
     "receiver": PAY_TO,
