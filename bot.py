@@ -200,7 +200,9 @@ def get_data():
     request_id, ip, paid = guard
 
     query = request.args.get("q", "").strip()
-    agent_format = request.args.get("format", "").lower() == "agent"
+    # Default to agent brief — paid callers expect LLM-ready, not a huge dump.
+    fmt = (request.args.get("format") or "agent").strip().lower()
+    agent_format = fmt != "full"
 
     if not query:
         return jsonify({"error": "missing_parameter", "message": "Use ?q=bitcoin"}), 400
@@ -237,7 +239,8 @@ def compare_coins():
     request_id, ip, paid = guard
 
     raw = request.args.get("coins", "").strip()
-    agent_format = request.args.get("format", "").lower() == "agent"
+    fmt = (request.args.get("format") or "agent").strip().lower()
+    agent_format = fmt != "full"
     if not raw:
         return jsonify({"error": "missing_parameter", "message": "Use ?coins=btc,eth,sol"}), 400
 

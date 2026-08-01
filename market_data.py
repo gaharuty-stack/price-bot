@@ -32,7 +32,7 @@ CG_TIMEOUT = 6
 
 
 def _headers() -> dict:
-    headers = {"User-Agent": "PriceBot/13.1", "Accept": "application/json"}
+    headers = {"User-Agent": "PriceBot/13.2", "Accept": "application/json"}
     if COINGECKO_API_KEY:
         headers["x-cg-demo-api-key"] = COINGECKO_API_KEY
     return headers
@@ -212,7 +212,7 @@ def get_trending(limit: int = 10) -> dict:
             {
                 "coin_id": coin_id,
                 "ticker": id_to_alias.get(coin_id, coin_id.split("-")[0].upper()),
-                "price_usd": round(float(data["usd"]), 2),
+                "price_usd": _smart_price(data["usd"]),
                 "change_24h_percent": round(change, 2),
                 "volume_24h": round(float(data.get("usd_24h_vol", 0) or 0), 2),
             }
@@ -222,6 +222,18 @@ def get_trending(limit: int = 10) -> dict:
     gainers = sorted_rows[:limit]
     losers = list(reversed(sorted_rows[-limit:]))
     return {"gainers": gainers, "losers": losers}
+
+
+def _smart_price(value: float) -> float:
+    """Keep meaningful digits for both BTC and micro-cap coins like SHIB."""
+    v = float(value)
+    if v >= 1000:
+        return round(v, 2)
+    if v >= 1:
+        return round(v, 4)
+    if v >= 0.01:
+        return round(v, 6)
+    return round(v, 8)
 
 
 def get_coin_data(query: str) -> dict | None:
@@ -252,7 +264,7 @@ def get_coin_data(query: str) -> dict | None:
         "coin_id": coin_id,
         "ticker": ticker,
         "name": query.strip().title(),
-        "price_usd": round(float(snapshot["usd"]), 2),
+        "price_usd": _smart_price(snapshot["usd"]),
         "change_24h_percent": round(float(snapshot.get("usd_24h_change", 0) or 0), 2),
         "volume_24h": round(float(snapshot.get("usd_24h_vol", 0) or 0), 2),
         "market_cap_usd": round(float(snapshot.get("usd_market_cap", 0) or 0), 2),
