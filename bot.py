@@ -325,46 +325,138 @@ def admin_stats():
     return jsonify(get_stats())
 
 
+def _payment_info():
+    """AgentCash / IETF payment discovery block (decimal USD amount)."""
+    return {
+        "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": f"{float(PAYMENT['amount']):.6f}",
+        },
+        "protocols": [
+            {"x402": {}},
+            {"mpp": {"method": "", "intent": "", "currency": ""}},
+        ],
+    }
+
+
+def _paid_402():
+    return {"402": {"description": "Payment Required"}}
+
+
 def _openapi_paths():
-    price = {"price": PAYMENT["amount"], "network": PAYMENT["network"]}
-    paid = {"402": {"description": "Payment required via x402"}}
+    legacy_x402 = {"price": PAYMENT["amount"], "network": PAYMENT["network"]}
+    agent_brief_schema = {
+        "type": "object",
+        "properties": {
+            "coin": {"type": "string"},
+            "price_usd": {"type": "number"},
+            "change_24h": {"type": "string"},
+            "signal": {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
+            "confidence": {"type": "number"},
+            "reason": {"type": "string"},
+            "action_hint": {"type": "string"},
+        },
+    }
     return {
         "/api/data": {
             "get": {
-                "summary": "Price + TA signal for one coin",
+                "operationId": "getCoinBrief",
+                "summary": "LLM-ready crypto brief for one coin (format=agent)",
+                "tags": ["Trading"],
                 "parameters": [
-                    {"name": "q", "in": "query", "required": True, "schema": {"type": "string", "example": "btc"}},
-                    {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["agent", "full"]}},
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": True,
+                        "description": "Coin ticker or id (btc, eth, sol, …)",
+                        "schema": {"type": "string", "minLength": 1, "example": "btc"},
+                    },
+                    {
+                        "name": "format",
+                        "in": "query",
+                        "description": "agent = short brief; full = verbose",
+                        "schema": {"type": "string", "enum": ["agent", "full"], "default": "agent"},
+                    },
                 ],
-                "responses": {"200": {"description": "Coin data"}, **paid},
-                "x402": price,
+                "responses": {
+                    "200": {
+                        "description": "Coin brief",
+                        "content": {"application/json": {"schema": agent_brief_schema}},
+                    },
+                    **_paid_402(),
+                },
+                "x-payment-info": _payment_info(),
+                "x402": legacy_x402,
             }
         },
         "/api/compare": {
             "get": {
+                "operationId": "compareCoins",
                 "summary": "Compare 2-5 coins in one request",
+                "tags": ["Trading"],
                 "parameters": [
-                    {"name": "coins", "in": "query", "required": True, "schema": {"type": "string", "example": "btc,eth,sol"}},
-                    {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["agent", "full"]}},
+                    {
+                        "name": "coins",
+                        "in": "query",
+                        "required": True,
+                        "description": "Comma-separated tickers, e.g. btc,eth,sol",
+                        "schema": {"type": "string", "minLength": 3, "example": "btc,eth,sol"},
+                    },
+                    {
+                        "name": "format",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["agent", "full"], "default": "agent"},
+                    },
                 ],
-                "responses": {"200": {"description": "Comparison"}, **paid},
-                "x402": price,
+                "responses": {
+                    "200": {"description": "Comparison"},
+                    **_paid_402(),
+                },
+                "x-payment-info": _payment_info(),
+                "x402": legacy_x402,
             }
         },
         "/api/trending": {
             "get": {
+                "operationId": "getTrending",
                 "summary": "Top gainers and losers (24h)",
-                "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer", "default": 5}}],
-                "responses": {"200": {"description": "Trending"}, **paid},
-                "x402": price,
+                "tags": ["Search"],
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {"type": "integer", "default": 5, "minimum": 1, "maximum": 10},
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Trending movers"},
+                    **_paid_402(),
+                },
+                "x-payment-info": _payment_info(),
+                "x402": legacy_x402,
             }
         },
-        "/api/coins": {"get": {"summary": "List supported coins (free)", "operationId": "listCoins"}},
+        "/api/coins": {
+            "get": {
+                "operationId": "listCoins",
+                "summary": "List supported coins (free)",
+                "tags": ["Search"],
+                "responses": {"200": {"description": "Supported coin ids"}},
+            }
+        },
         "/api/preview": {
             "get": {
+                "operationId": "previewBrief",
                 "summary": "Free taste of agent brief (no action_hint / targets)",
+                "tags": ["Search"],
                 "parameters": [
-                    {"name": "q", "in": "query", "required": True, "schema": {"type": "string", "example": "btc"}},
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string", "minLength": 1, "example": "btc"},
+                    },
                 ],
                 "responses": {"200": {"description": "Preview brief with upgrade hint"}},
             }
@@ -375,17 +467,29 @@ def _openapi_paths():
 @app.route("/openapi.json", methods=["GET"])
 @app.route("/.well-known/x402", methods=["GET"])
 def openapi_spec():
+    info = {
+        "title": "Crypto Agent Brief API",
+        "version": VERSION,
+        "description": (
+            "LLM-ready crypto briefs: price, TA, compare, trending. "
+            f"{PAYMENT['amount']} {PAYMENT['currency']} on Base via x402."
+        ),
+        "x-guidance": (
+            "Start with free GET /api/preview?q=btc. "
+            "For a full agent brief use GET /api/data?q=btc&format=agent (paid via x402 USDC on Base). "
+            "Compare coins with GET /api/compare?coins=btc,eth,sol&format=agent. "
+            "Movers: GET /api/trending. Read /llms.txt for agent instructions. "
+            f"Price per paid call: {PAYMENT['amount']} USDC."
+        ),
+        "x402": PAYMENT,
+    }
+    contact_email = os.environ.get("CONTACT_EMAIL", "").strip()
+    if contact_email:
+        info["contact"] = {"email": contact_email}
+
     return jsonify({
-        "openapi": "3.0.0",
-        "info": {
-            "title": "Crypto Agent Brief API",
-            "version": VERSION,
-            "description": (
-                "LLM-ready crypto briefs: price, TA, compare, trending. "
-                f"{PAYMENT['amount']} {PAYMENT['currency']} on Base via x402."
-            ),
-            "x402": PAYMENT,
-        },
+        "openapi": "3.1.0",
+        "info": info,
         "servers": [{"url": SERVICE_URL}],
         "paths": _openapi_paths(),
     })
