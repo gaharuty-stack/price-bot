@@ -21,15 +21,15 @@ Hardening release:
 | 15 fields of JSON | 1 concise brief with `reason` + `action_hint` |
 | 1 coin per call | Compare 5 coins in 1 call |
 | No signal context | BUY/SELL/HOLD + confidence |
-| Free but verbose | $0.001 — saves agent tokens & round-trips |
+| Free but verbose | $0.01 — saves agent tokens & round-trips |
 
 ## Pricing
 
 | Endpoint | Price |
 |----------|-------|
-| `GET /api/data?q=btc&format=agent` | **$0.001 USDC** |
-| `GET /api/compare?coins=btc,eth,sol&format=agent` | **$0.001 USDC** |
-| `GET /api/trending` | **$0.001 USDC** |
+| `GET /api/data?q=btc&format=agent` | **$0.01 USDC** |
+| `GET /api/compare?coins=btc,eth,sol&format=agent` | **$0.01 USDC** |
+| `GET /api/trending` | **$0.01 USDC** |
 | `/api/coins`, `/api/preview`, `/health`, `/llms.txt`, `/.well-known/x402` | Free |
 
 ## Example: free preview
