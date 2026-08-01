@@ -7,11 +7,11 @@ from datetime import datetime
 from cachetools import TTLCache
 from flask import Flask, jsonify, make_response, request
 
-from agent_format import build_agent_brief, build_preview_brief
+from agent_format import build_agent_brief, build_preview_brief, enrich_compare_with_relative
 from config import COINS, MAX_COMPARE_COINS, PAYMENT, PREVIEW_RATE_LIMIT_PER_MINUTE, RATE_LIMIT_PER_MINUTE, SERVICE_URL, VERSION
 from db import check_rate_limit, get_stats, init_db, log_request
 from integrity import sign_data
-from market_data import get_coin_data, get_last_snapshot_at, get_trending, resolve_coin_id, start_price_updater
+from market_data import get_coin_data, get_last_snapshot_at, get_market_snapshot, get_trending, resolve_coin_id, start_price_updater
 from signals import generate_signal
 
 logging.basicConfig(
@@ -112,6 +112,7 @@ def build_coin_response(query: str) -> dict:
         "confidence": signal_data["confidence"],
         "target_price": signal_data["target_price"],
         "stop_loss": signal_data["stop_loss"],
+        "ohlc": market.get("ohlc") or [],
         "indicators": {
             "rsi": signal_data["rsi"],
             "macd": signal_data["macd"],
@@ -234,7 +235,9 @@ def get_data():
             logger.exception("Failed for %s", query)
             return jsonify({"error": "upstream_unavailable", "message": str(exc)}), 503
 
-        data = build_agent_brief(result) if agent_format else result
+        data = build_agent_brief(result) if agent_format else {
+            k: v for k, v in result.items() if k not in ("ohlc", "closes")
+        }
         response_cache[cache_key] = {"status": "ok", "query": query, "data": data, "format": "agent" if agent_format else "full"}
 
     payload = {**response_cache[cache_key], "payment": PAYMENT, "paid_request": paid}
@@ -263,14 +266,17 @@ def compare_coins():
     if len(queries) < 2:
         return jsonify({"error": "invalid_parameter", "message": "Provide at least 2 coins"}), 400
 
-    results, errors = [], []
+    results, errors, raw_rows = [], [], []
     for q in queries:
         if not resolve_coin_id(q):
             errors.append(q)
             continue
         try:
             row = build_coin_response(q)
-            results.append(build_agent_brief(row) if agent_format else row)
+            raw_rows.append(row)
+            results.append(build_agent_brief(row) if agent_format else {
+                k: v for k, v in row.items() if k not in ("ohlc", "closes")
+            })
         except Exception:
             errors.append(q)
 
@@ -287,15 +293,33 @@ def compare_coins():
     best_key = best.get("ticker") or best.get("coin_id") or best.get("coin")
     worst_key = worst.get("ticker") or worst.get("coin_id") or worst.get("coin")
 
+    btc_change = None
+    btc_row = get_market_snapshot("bitcoin")
+    if btc_row:
+        try:
+            btc_change = float(btc_row.get("usd_24h_change", 0) or 0)
+        except (TypeError, ValueError):
+            btc_change = None
+    briefs = [build_agent_brief(r) for r in raw_rows]
+    rel = enrich_compare_with_relative(briefs, btc_change)
+
     summary = {
         "best_performer": best_key,
         "worst_performer": worst_key,
+        "best_edge": rel.get("best_edge"),
+        "best_vs_btc": rel.get("best_vs_btc"),
         "count": len(results),
+        "bundle": {
+            "coins": len(results),
+            "price_usdc": PAYMENT["amount"],
+            "note": f"{len(results)} coin briefs in one ${PAYMENT['amount']} call",
+        },
     }
 
     payload = {
         "status": "ok",
         "coins": results,
+        "relative_strength": rel.get("relative"),
         "summary": summary,
         "errors": errors,
         "format": "agent" if agent_format else "full",
@@ -370,8 +394,22 @@ def _openapi_paths():
             "change_24h": {"type": "string"},
             "signal": {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
             "confidence": {"type": "number"},
+            "edge_score": {"type": "integer"},
+            "regime": {"type": "string", "enum": ["calm", "normal", "volatile"]},
+            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+            "levels": {
+                "type": "object",
+                "properties": {
+                    "support": {"type": "number"},
+                    "resistance": {"type": "number"},
+                    "window_days": {"type": "integer"},
+                },
+            },
             "reason": {"type": "string"},
             "action_hint": {"type": "string"},
+            "invalidation": {"type": "string"},
+            "target_price": {"type": "number"},
+            "stop_loss": {"type": "number"},
         },
     }
     # security: [] => AgentCash authMode "unprotected"
@@ -531,18 +569,20 @@ def openapi_spec():
         "title": "Crypto Agent Brief API",
         "version": VERSION,
         "description": (
-            "Crypto price + technical analysis (TA) briefs for AI agents: "
-            "Bitcoin, Ethereum, Solana and 40+ coins. BUY/SELL/HOLD signals with RSI/MACD. "
-            f"Pay-per-call {PAYMENT['amount']} USDC on Base via x402. Free preview available."
+            "Cheap x402 crypto intelligence for AI agents: price + BUY/SELL/HOLD + "
+            "support/resistance levels + volatility regime + risk + invalidation line. "
+            "Bitcoin, Ethereum, Solana and 40+ coins. "
+            f"Pay-per-call {PAYMENT['amount']} USDC on Base. Compare up to 5 coins in one call. "
+            "Free preview available."
         ),
         "x-guidance": (
-            "Use this API when you need a crypto price, trading signal, or TA brief for an AI agent. "
-            "Free preview: GET /api/preview?q=btc (Bitcoin) or ?q=eth / ?q=sol. "
-            "Paid single-coin brief: GET /api/data?q=btc (default format=agent) — returns price, "
-            "BUY/SELL/HOLD, reason, action_hint. "
-            "Compare coins: GET /api/compare?coins=btc,eth,sol. "
-            "Market movers: GET /api/trending for top gainers/losers 24h. "
-            f"Each paid call costs {PAYMENT['amount']} USDC on Base (x402). Read /llms.txt first."
+            "Unique agent pack: not raw prices — you get signal, S/R levels, regime, risk, "
+            "edge_score and invalidation in one cheap call. "
+            "Free: GET /api/preview?q=btc. "
+            "Paid single coin: GET /api/data?q=btc. "
+            "Paid compare (best value): GET /api/compare?coins=btc,eth,sol — multiple briefs + vs-BTC relative strength "
+            f"for one {PAYMENT['amount']} USDC payment. "
+            "Movers: GET /api/trending. Read /llms.txt."
         ),
         "x402": PAYMENT,
         "contact": {
@@ -586,34 +626,32 @@ def mcp_discovery():
 def llms_txt():
     text = f"""# Crypto Agent Brief API v{VERSION}
 
-> Crypto price + TA (technical analysis) briefs for AI agents.
-> Bitcoin, Ethereum, Solana and 40+ coins. Pay per call via x402 USDC on Base.
+> Cheap x402 crypto intelligence for AI agents — not raw CoinGecko dumps.
+> One call: price + BUY/SELL/HOLD + support/resistance + regime + risk + invalidation.
 
-## When to use
-- Free Bitcoin/ETH preview → GET /api/preview?q=btc
-- Need BUY/SELL/HOLD signal + price for one coin → GET /api/data?q=btc
-- Compare BTC vs ETH vs SOL → GET /api/compare?coins=btc,eth,sol
-- Top crypto gainers/losers today → GET /api/trending
+## Why this vs others
+- Most APIs sell price only or expensive essays
+- We sell a compact **agent pack** agents can act on
+- Compare up to 5 coins in **one** ${PAYMENT['amount']} payment (best value)
+- Free preview to try before paying
 
-## Keywords agents search for
-crypto price, bitcoin price, ethereum signal, solana TA, trading signal,
-BUY SELL HOLD, RSI MACD, LLM crypto brief, market movers, compare coins
+## Endpoints
+- Free preview → GET /api/preview?q=btc
+- Full agent pack → GET /api/data?q=btc
+- Multi-coin + vs-BTC strength → GET /api/compare?coins=btc,eth,sol
+- Gainers/losers → GET /api/trending
+
+## Agent pack fields
+coin, price_usd, signal, confidence, edge_score, regime, risk,
+levels.support, levels.resistance, reason, action_hint, invalidation,
+target_price, stop_loss
 
 ## Pricing
-- Free preview: /api/preview?q=btc — signal + reason (no action_hint)
-- Paid: /api/data, /api/compare, /api/trending — {PAYMENT['amount']} USDC each
-- Free: /api/coins, /health, /.well-known/x402, /llms.txt
+- Free: /api/preview, /api/coins, /llms.txt
+- Paid: {PAYMENT['amount']} USDC on Base (x402) per /api/data|/api/compare|/api/trending
 
 ## Base URL
 {SERVICE_URL}
-
-## Example
-GET {SERVICE_URL}/api/data?q=btc
-→ coin, price_usd, signal, reason, action_hint (format=agent by default)
-
-## Discovery
-- OpenAPI: {SERVICE_URL}/openapi.json
-- x402: {SERVICE_URL}/.well-known/x402
 """
     return make_response(text, 200, {"Content-Type": "text/plain; charset=utf-8"})
 

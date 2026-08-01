@@ -22,29 +22,112 @@ def _bollinger_label(price: float, bollinger: dict) -> str:
     return "price mid-range in Bollinger bands"
 
 
+def _smart_price(value: float) -> float:
+    v = float(value)
+    if v >= 1000:
+        return round(v, 2)
+    if v >= 1:
+        return round(v, 4)
+    if v >= 0.01:
+        return round(v, 6)
+    return round(v, 8)
+
+
+def _levels_from_ohlc(ohlc: list, price: float) -> dict:
+    """Near-term support/resistance from recent daily OHLC highs/lows."""
+    if not ohlc or len(ohlc) < 5:
+        return {
+            "support": _smart_price(price * 0.97),
+            "resistance": _smart_price(price * 1.03),
+            "window_days": 0,
+        }
+    window = ohlc[-14:] if len(ohlc) >= 14 else ohlc
+    # CoinGecko OHLC row: [ts, open, high, low, close]
+    highs = [float(row[2]) for row in window if len(row) >= 5]
+    lows = [float(row[3]) for row in window if len(row) >= 5]
+    if not highs or not lows:
+        return {
+            "support": _smart_price(price * 0.97),
+            "resistance": _smart_price(price * 1.03),
+            "window_days": len(window),
+        }
+    support = min(lows)
+    resistance = max(highs)
+    # Keep levels on the useful side of spot when possible
+    if support >= price:
+        support = min(lows + [price * 0.98])
+    if resistance <= price:
+        resistance = max(highs + [price * 1.02])
+    return {
+        "support": _smart_price(support),
+        "resistance": _smart_price(resistance),
+        "window_days": len(window),
+    }
+
+
+def _regime_and_risk(price: float, atr: float, change_24h: float, confidence: float) -> tuple[str, str, int]:
+    atr_pct = (atr / price * 100) if price > 0 and atr > 0 else abs(change_24h)
+    if atr_pct < 1.5:
+        regime = "calm"
+    elif atr_pct < 4:
+        regime = "normal"
+    else:
+        regime = "volatile"
+
+    if regime == "volatile" or abs(change_24h) > 8 or confidence < 55:
+        risk = "high"
+    elif regime == "normal" or abs(change_24h) > 3:
+        risk = "medium"
+    else:
+        risk = "low"
+
+    # Edge score: confidence adjusted by regime clarity
+    edge = int(confidence)
+    if regime == "calm" and confidence >= 60:
+        edge = min(95, edge + 5)
+    if regime == "volatile":
+        edge = max(20, edge - 8)
+    return regime, risk, edge
+
+
 def build_agent_brief(data: dict) -> dict:
     indicators = data["indicators"]
     rsi = indicators["rsi"]
     macd = indicators["macd"]
     bollinger = indicators["bollinger"]
+    atr = float(indicators.get("atr") or 0)
     change = data["change_24h_percent"]
     signal = data["signal"]
     price = data["price_usd"]
+    levels = _levels_from_ohlc(data.get("ohlc") or [], price)
+    regime, risk, edge_score = _regime_and_risk(price, atr, change, float(data["confidence"]))
 
     parts = [
         _rsi_label(rsi),
         _macd_label(macd),
         _bollinger_label(price, bollinger),
         f"24h change {change:+.2f}%",
+        f"regime {regime}",
     ]
     reason = "; ".join(parts)
 
     if signal == "BUY":
-        action_hint = f"Bullish bias ({data['confidence']}% confidence). Watch target ${data['target_price']}, stop ${data['stop_loss']}."
+        action_hint = (
+            f"Bullish bias ({data['confidence']}% conf, edge {edge_score}). "
+            f"Target ${_smart_price(data['target_price'])}, stop ${_smart_price(data['stop_loss'])}. "
+            f"Invalidation: daily close below support {levels['support']}."
+        )
     elif signal == "SELL":
-        action_hint = f"Bearish bias ({data['confidence']}% confidence). Watch target ${data['target_price']}, stop ${data['stop_loss']}."
+        action_hint = (
+            f"Bearish bias ({data['confidence']}% conf, edge {edge_score}). "
+            f"Target ${_smart_price(data['target_price'])}, stop ${_smart_price(data['stop_loss'])}. "
+            f"Invalidation: daily close above resistance {levels['resistance']}."
+        )
     else:
-        action_hint = "No strong edge. Wait for clearer RSI/MACD alignment before acting."
+        action_hint = (
+            f"No strong edge (score {edge_score}, risk {risk}). "
+            f"Wait between support {levels['support']} and resistance {levels['resistance']}."
+        )
 
     return {
         "coin": data.get("ticker") or data.get("coin_id", ""),
@@ -52,10 +135,50 @@ def build_agent_brief(data: dict) -> dict:
         "change_24h": f"{change:+.2f}%",
         "signal": signal,
         "confidence": data["confidence"],
+        "edge_score": edge_score,
+        "regime": regime,
+        "risk": risk,
+        "levels": levels,
         "reason": reason,
         "action_hint": action_hint,
-        "target_price": data["target_price"],
-        "stop_loss": data["stop_loss"],
+        "target_price": _smart_price(data["target_price"]),
+        "stop_loss": _smart_price(data["stop_loss"]),
+        "invalidation": (
+            f"close below {levels['support']}"
+            if signal == "BUY"
+            else (
+                f"close above {levels['resistance']}"
+                if signal == "SELL"
+                else f"break of {levels['support']}–{levels['resistance']} range"
+            )
+        ),
+    }
+
+
+def enrich_compare_with_relative(briefs: list[dict], btc_change: float | None) -> dict:
+    """Add vs-BTC relative strength — differentiator vs single-coin price APIs."""
+    ranked = []
+    for b in briefs:
+        change = float(str(b.get("change_24h", "0")).replace("%", "").replace("+", "") or 0)
+        vs_btc = None if btc_change is None else round(change - btc_change, 2)
+        ranked.append({
+            "coin": b.get("coin"),
+            "change_24h": change,
+            "vs_btc_24h": vs_btc,
+            "signal": b.get("signal"),
+            "edge_score": b.get("edge_score"),
+            "risk": b.get("risk"),
+        })
+    by_edge = sorted(ranked, key=lambda r: (r.get("edge_score") or 0), reverse=True)
+    by_rel = sorted(
+        ranked,
+        key=lambda r: (r["vs_btc_24h"] if r["vs_btc_24h"] is not None else r["change_24h"]),
+        reverse=True,
+    )
+    return {
+        "relative": ranked,
+        "best_edge": by_edge[0]["coin"] if by_edge else None,
+        "best_vs_btc": by_rel[0]["coin"] if by_rel else None,
     }
 
 
@@ -69,11 +192,25 @@ def build_preview_brief(data: dict, query: str, service_url: str, price: str) ->
             "price_usd": brief["price_usd"],
             "change_24h": brief["change_24h"],
             "signal": brief["signal"],
+            "regime": brief["regime"],
+            "risk": brief["risk"],
             "reason": brief["reason"],
         },
         "upgrade": {
-            "endpoint": f"{service_url}/api/data?q={query}&format=agent",
+            "endpoint": f"{service_url}/api/data?q={query}",
             "price": f"{price} USDC",
-            "includes": ["action_hint", "confidence", "target_price", "stop_loss", "full indicators"],
+            "includes": [
+                "action_hint",
+                "confidence",
+                "edge_score",
+                "levels.support/resistance",
+                "invalidation",
+                "target_price",
+                "stop_loss",
+            ],
+            "why_unique": (
+                "One cheap call returns price + TA signal + S/R levels + regime/risk "
+                "+ invalidation line — not a raw CoinGecko dump."
+            ),
         },
     }

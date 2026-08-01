@@ -56,29 +56,38 @@ def generate_signal(
     if buy_score > sell_score:
         signal = "BUY"
         confidence = min(85, 45 + buy_score * 0.6)
-        target = round(price * 1.02, 2)
-        stop = round(price * 0.98, 2)
+        target = price * 1.02
+        stop = price * 0.98
     elif sell_score > buy_score:
         signal = "SELL"
         confidence = min(85, 45 + sell_score * 0.6)
-        target = round(price * 0.98, 2)
-        stop = round(price * 1.02, 2)
+        target = price * 0.98
+        stop = price * 1.02
     else:
         signal = "HOLD"
         confidence = 50.0
         target = price
         stop = price
 
+    def _px(v: float) -> float:
+        if v >= 1000:
+            return round(v, 2)
+        if v >= 1:
+            return round(v, 4)
+        if v >= 0.01:
+            return round(v, 6)
+        return round(v, 8)
+
     return {
         "signal": signal,
         "confidence": round(confidence, 1),
-        "target_price": target,
-        "stop_loss": stop,
+        "target_price": _px(target),
+        "stop_loss": _px(stop),
         "rsi": rsi,
         "macd": macd,
         "bollinger": bollinger,
         "stochastic": stochastic,
         "atr": atr,
-        "methodology": "rule_based_ta",
+        "methodology": "rule_based_ta_v2",
         "disclaimer": "Not financial advice. Signals are heuristic summaries of TA indicators.",
     }

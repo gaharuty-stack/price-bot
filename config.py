@@ -72,5 +72,5 @@ SERVICE_URL = os.environ.get(
     "https://price-bot-production-4d6a.up.railway.app",
 )
 
-VERSION = "13.2.4"
+VERSION = "13.3.0"
 MAX_COMPARE_COINS = 5
