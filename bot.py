@@ -380,26 +380,35 @@ def _openapi_paths():
         "/api/data": {
             "get": {
                 "operationId": "getCoinBrief",
-                "summary": "LLM-ready crypto brief for one coin (format=agent)",
-                "tags": ["Trading"],
+                "summary": (
+                    "Bitcoin/ETH/SOL crypto price + BUY/SELL/HOLD TA signal — "
+                    "LLM-ready brief for AI trading agents (x402)"
+                ),
+                "description": (
+                    "Returns current USD price, 24h change, RSI/MACD/Bollinger context, "
+                    "BUY/SELL/HOLD signal, confidence, reason, and action_hint for one coin "
+                    "(btc, eth, sol, and 40+ others). Optimized for LLM agents. "
+                    "Default format=agent. Pay per call with USDC on Base via x402."
+                ),
+                "tags": ["Trading", "Crypto", "Signals"],
                 "parameters": [
                     {
                         "name": "q",
                         "in": "query",
                         "required": True,
-                        "description": "Coin ticker or id (btc, eth, sol, …)",
+                        "description": "Coin ticker or id: btc, eth, sol, bitcoin, ethereum, …",
                         "schema": {"type": "string", "minLength": 1, "example": "btc"},
                     },
                     {
                         "name": "format",
                         "in": "query",
-                        "description": "agent = short brief; full = verbose",
+                        "description": "agent = short brief (default); full = verbose JSON",
                         "schema": {"type": "string", "enum": ["agent", "full"], "default": "agent"},
                     },
                 ],
                 "responses": {
                     "200": {
-                        "description": "Coin brief",
+                        "description": "Coin brief with price and TA signal",
                         "content": {"application/json": {"schema": agent_brief_schema}},
                     },
                     **_paid_402(),
@@ -411,8 +420,16 @@ def _openapi_paths():
         "/api/compare": {
             "get": {
                 "operationId": "compareCoins",
-                "summary": "Compare 2-5 coins in one request",
-                "tags": ["Trading"],
+                "summary": (
+                    "Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — "
+                    "best/worst 24h performer for AI agents"
+                ),
+                "description": (
+                    "Compare 2–5 cryptocurrencies in one paid call. Returns per-coin "
+                    "price + TA signal briefs and a summary of best/worst 24h performers. "
+                    "Example: coins=btc,eth,sol. Useful for portfolio ranking and agent decisions."
+                ),
+                "tags": ["Trading", "Crypto", "Compare"],
                 "parameters": [
                     {
                         "name": "coins",
@@ -428,7 +445,7 @@ def _openapi_paths():
                     },
                 ],
                 "responses": {
-                    "200": {"description": "Comparison"},
+                    "200": {"description": "Multi-coin comparison with best/worst summary"},
                     **_paid_402(),
                 },
                 "x-payment-info": _payment_info(),
@@ -438,8 +455,15 @@ def _openapi_paths():
         "/api/trending": {
             "get": {
                 "operationId": "getTrending",
-                "summary": "Top gainers and losers (24h)",
-                "tags": ["Search"],
+                "summary": (
+                    "Top crypto gainers and losers last 24h — "
+                    "trending movers for AI trading agents"
+                ),
+                "description": (
+                    "Lists top gainers and losers among supported coins by 24h percent change. "
+                    "Use when an agent needs market movers, momentum scan, or what is pumping/dumping today."
+                ),
+                "tags": ["Search", "Crypto", "Trending"],
                 "parameters": [
                     {
                         "name": "limit",
@@ -448,7 +472,7 @@ def _openapi_paths():
                     }
                 ],
                 "responses": {
-                    "200": {"description": "Trending movers"},
+                    "200": {"description": "Trending gainers and losers"},
                     **_paid_402(),
                 },
                 "x-payment-info": _payment_info(),
@@ -458,8 +482,8 @@ def _openapi_paths():
         "/api/coins": {
             "get": {
                 "operationId": "listCoins",
-                "summary": "List supported coins (free)",
-                "tags": ["Search"],
+                "summary": "List supported crypto coins and tickers (free)",
+                "tags": ["Search", "Crypto"],
                 "security": free_security,
                 "responses": {"200": {"description": "Supported coin ids"}},
             }
@@ -467,8 +491,12 @@ def _openapi_paths():
         "/api/preview": {
             "get": {
                 "operationId": "previewBrief",
-                "summary": "Free taste of agent brief (no action_hint / targets)",
-                "tags": ["Search"],
+                "summary": "Free Bitcoin/ETH crypto price + signal preview (no payment)",
+                "description": (
+                    "Free taste of the agent brief: price, 24h change, BUY/SELL/HOLD signal and reason. "
+                    "No action_hint/targets. Upgrade to /api/data for full brief."
+                ),
+                "tags": ["Search", "Crypto"],
                 "security": free_security,
                 "parameters": [
                     {
@@ -503,15 +531,18 @@ def openapi_spec():
         "title": "Crypto Agent Brief API",
         "version": VERSION,
         "description": (
-            "LLM-ready crypto briefs: price, TA, compare, trending. "
-            f"{PAYMENT['amount']} {PAYMENT['currency']} on Base via x402."
+            "Crypto price + technical analysis (TA) briefs for AI agents: "
+            "Bitcoin, Ethereum, Solana and 40+ coins. BUY/SELL/HOLD signals with RSI/MACD. "
+            f"Pay-per-call {PAYMENT['amount']} USDC on Base via x402. Free preview available."
         ),
         "x-guidance": (
-            "Start with free GET /api/preview?q=btc. "
-            "For a full agent brief use GET /api/data?q=btc&format=agent (paid via x402 USDC on Base). "
-            "Compare coins with GET /api/compare?coins=btc,eth,sol&format=agent. "
-            "Movers: GET /api/trending. Read /llms.txt for agent instructions. "
-            f"Price per paid call: {PAYMENT['amount']} USDC."
+            "Use this API when you need a crypto price, trading signal, or TA brief for an AI agent. "
+            "Free preview: GET /api/preview?q=btc (Bitcoin) or ?q=eth / ?q=sol. "
+            "Paid single-coin brief: GET /api/data?q=btc (default format=agent) — returns price, "
+            "BUY/SELL/HOLD, reason, action_hint. "
+            "Compare coins: GET /api/compare?coins=btc,eth,sol. "
+            "Market movers: GET /api/trending for top gainers/losers 24h. "
+            f"Each paid call costs {PAYMENT['amount']} USDC on Base (x402). Read /llms.txt first."
         ),
         "x402": PAYMENT,
         "contact": {
@@ -555,26 +586,30 @@ def mcp_discovery():
 def llms_txt():
     text = f"""# Crypto Agent Brief API v{VERSION}
 
-> LLM-ready crypto price + TA briefs. Pay per call via x402 USDC on Base.
+> Crypto price + TA (technical analysis) briefs for AI agents.
+> Bitcoin, Ethereum, Solana and 40+ coins. Pay per call via x402 USDC on Base.
 
 ## When to use
-- Try before you pay → GET /api/preview?q=btc (free)
-- Need a concise trading brief for one coin → GET /api/data?q=btc&format=agent
-- Compare multiple coins in one call → GET /api/compare?coins=btc,eth,sol&format=agent
-- Find top movers → GET /api/trending
+- Free Bitcoin/ETH preview → GET /api/preview?q=btc
+- Need BUY/SELL/HOLD signal + price for one coin → GET /api/data?q=btc
+- Compare BTC vs ETH vs SOL → GET /api/compare?coins=btc,eth,sol
+- Top crypto gainers/losers today → GET /api/trending
+
+## Keywords agents search for
+crypto price, bitcoin price, ethereum signal, solana TA, trading signal,
+BUY SELL HOLD, RSI MACD, LLM crypto brief, market movers, compare coins
 
 ## Pricing
-- Free preview: /api/preview?q=btc — signal + reason, no action_hint
+- Free preview: /api/preview?q=btc — signal + reason (no action_hint)
 - Paid: /api/data, /api/compare, /api/trending — {PAYMENT['amount']} USDC each
-- Free: /api/coins, /health, /.well-known/x402
+- Free: /api/coins, /health, /.well-known/x402, /llms.txt
 
 ## Base URL
 {SERVICE_URL}
 
-## Example (agent format)
-GET {SERVICE_URL}/api/data?q=btc&format=agent
-
-Returns: coin, price, signal, reason, action_hint — optimized for LLM consumption.
+## Example
+GET {SERVICE_URL}/api/data?q=btc
+→ coin, price_usd, signal, reason, action_hint (format=agent by default)
 
 ## Discovery
 - OpenAPI: {SERVICE_URL}/openapi.json

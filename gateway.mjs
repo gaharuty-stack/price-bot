@@ -57,11 +57,11 @@ const paidRoute = (path, description, discovery) => ({
 });
 
 app.use(paymentMiddleware({
-  ...paidRoute("/api/data", "LLM-ready crypto brief for one coin (?format=agent)", {
+  ...paidRoute("/api/data", "Bitcoin/ETH/SOL price + BUY/SELL/HOLD TA brief for AI agents (x402)", {
     input: { q: "btc", format: "agent" },
     inputSchema: {
       properties: {
-        q: { type: "string", description: "Coin ticker or id" },
+        q: { type: "string", description: "Coin ticker: btc, eth, sol, bitcoin, …" },
         format: { type: "string", enum: ["agent", "full"] },
       },
       required: ["q"],
@@ -76,18 +76,18 @@ app.use(paymentMiddleware({
       },
     },
   }),
-  ...paidRoute("/api/compare", "Compare 2-5 coins in one request", {
+  ...paidRoute("/api/compare", "Compare Bitcoin vs Ethereum vs Solana — best/worst 24h for agents", {
     input: { coins: "btc,eth,sol", format: "agent" },
     inputSchema: {
       properties: {
-        coins: { type: "string", description: "Comma-separated tickers" },
+        coins: { type: "string", description: "Comma-separated tickers e.g. btc,eth,sol" },
         format: { type: "string", enum: ["agent", "full"] },
       },
       required: ["coins"],
     },
     output: { example: { status: "ok", results: [] } },
   }),
-  ...paidRoute("/api/trending", "Top gainers and losers (24h)", {
+  ...paidRoute("/api/trending", "Top crypto gainers and losers 24h — trending movers for agents", {
     input: { limit: "5" },
     inputSchema: {
       properties: {
