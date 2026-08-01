@@ -17,6 +17,9 @@ const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 const resourceServer = new x402ResourceServer(facilitator).register(NETWORK, new ExactEvmScheme());
 
 const app = express();
+// Railway terminates TLS; without this, x402 resource URLs become http:// and break settle/indexing.
+app.set("trust proxy", 1);
+
 const proxy = createProxyMiddleware({
   target: FLASK_TARGET,
   changeOrigin: true,

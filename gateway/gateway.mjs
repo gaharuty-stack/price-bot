@@ -17,6 +17,8 @@ const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 const resourceServer = new x402ResourceServer(facilitator).register(NETWORK, new ExactEvmScheme());
 
 const app = express();
+app.set("trust proxy", 1);
+
 const proxy = createProxyMiddleware({
   target: FLASK_TARGET,
   changeOrigin: true,

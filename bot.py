@@ -56,7 +56,22 @@ def _unhandled(exc):
 
 
 def payment_was_settled(req) -> bool:
-    for header in ("X-Payment-Response", "X-PAYMENT-RESPONSE", "Payment-Response", "X-Payment-Tx-Hash"):
+    """True when client presented an x402 payment proof on the request.
+
+    Settlement response headers are added by the gateway on the way *out*.
+    Flask only sees inbound proof headers (PAYMENT-SIGNATURE / X-PAYMENT).
+    """
+    for header in (
+        "PAYMENT-SIGNATURE",
+        "Payment-Signature",
+        "X-PAYMENT",
+        "X-Payment",
+        "PAYMENT-RESPONSE",
+        "Payment-Response",
+        "X-PAYMENT-RESPONSE",
+        "X-Payment-Response",
+        "X-Payment-Tx-Hash",
+    ):
         if req.headers.get(header):
             return True
     return False
