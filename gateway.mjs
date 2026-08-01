@@ -16,7 +16,13 @@ const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 const resourceServer = new x402ResourceServer(facilitator).register(NETWORK, new ExactEvmScheme());
 
 const app = express();
-const proxy = createProxyMiddleware({ target: FLASK_TARGET, changeOrigin: true });
+const proxy = createProxyMiddleware({
+  target: FLASK_TARGET,
+  changeOrigin: true,
+  // Fail fast instead of hanging agents for 30–120s (was causing Railway red latency).
+  proxyTimeout: 20000,
+  timeout: 20000,
+});
 
 const freeRoutes = [
   "/",
@@ -54,5 +60,5 @@ app.get("/api/compare", proxy);
 app.get("/api/trending", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`x402 gateway v13 on :${PORT} price=${PRICE_LABEL}`);
+  console.log(`x402 gateway v13.1 on :${PORT} price=${PRICE_LABEL}`);
 });

@@ -19,4 +19,5 @@ COPY ai.txt robots.txt ./
 
 EXPOSE 8080
 
-CMD sh -c "gunicorn --bind 127.0.0.1:5000 --workers 1 --threads 4 --timeout 120 bot:app & sleep 4 && exec node gateway.mjs"
+# Shorter worker timeout: better 503 than 2-minute hangs that show as 5xx/latency spikes.
+CMD sh -c "gunicorn --bind 127.0.0.1:5000 --workers 1 --threads 8 --timeout 25 --keep-alive 5 bot:app & sleep 2 && exec node gateway.mjs"

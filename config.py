@@ -31,7 +31,7 @@ COINS = {
     "ripple": "ripple", "xrp": "ripple",
     "polkadot": "polkadot", "dot": "polkadot",
     "chainlink": "chainlink", "link": "chainlink",
-    "polygon": "polygon", "matic": "polygon",
+    "polygon": "matic-network", "matic": "matic-network", "matic-network": "matic-network",
     "litecoin": "litecoin", "ltc": "litecoin",
     "stellar": "stellar", "xlm": "stellar",
     "monero": "monero", "xmr": "monero",
@@ -72,5 +72,5 @@ SERVICE_URL = os.environ.get(
     "https://price-bot-production-4d6a.up.railway.app",
 )
 
-VERSION = "13.0.0"
+VERSION = "13.1.0"
 MAX_COMPARE_COINS = 5

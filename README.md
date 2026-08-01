@@ -1,9 +1,18 @@
 # Crypto Agent Brief API
 
-LLM-ready crypto price + TA briefs for AI agents.  
+LLM-ready crypto price + TA briefs for AI agents.
 Pay per call via **x402 / USDC on Base** (PayAI facilitator).
 
 **Live:** https://price-bot-production-4d6a.up.railway.app
+
+## Status (v13.1)
+
+Hardening release:
+- non-blocking CoinGecko boot (no healthcheck stalls)
+- shorter upstream timeouts (fail fast instead of 15s+ hangs)
+- OHLC warm cache for hot coins
+- gateway proxy timeout 20s
+- `/health` now counts free traffic too (was stuck at 0)
 
 ## Why agents use this (not raw CoinGecko)
 
@@ -29,64 +38,9 @@ Pay per call via **x402 / USDC on Base** (PayAI facilitator).
 GET /api/preview?q=btc
 ```
 
-Returns price, signal, reason — no `action_hint` or targets. Includes upgrade URL to paid brief.
-
-## Example: agent brief (paid)
-
-```
-GET /api/data?q=btc&format=agent
-```
-
-```json
-{
-  "status": "ok",
-  "data": {
-    "coin": "BTC",
-    "price_usd": 64373,
-    "change_24h": "+0.63%",
-    "signal": "HOLD",
-    "confidence": 50.0,
-    "reason": "neutral (RSI 52); MACD bearish; price mid-range in Bollinger bands; 24h change +0.63%",
-    "action_hint": "No strong edge. Wait for clearer RSI/MACD alignment before acting.",
-    "target_price": 64373,
-    "stop_loss": 64373
-  }
-}
-```
-
-## Example: compare (paid)
-
-```
-GET /api/compare?coins=btc,eth,sol&format=agent
-```
-
-Returns 3 coins + best/worst performer summary in one response.
-
-## Example: trending (paid)
-
-```
-GET /api/trending?limit=5
-```
-
-Returns top 5 gainers and losers from supported coins (24h).
-
-## Free discovery
-
-```
-GET /api/coins
-GET /api/preview?q=btc
-GET /health
-GET /llms.txt
-GET /.well-known/x402
-```
-
-## Supported coins (40+)
-
-BTC, ETH, SOL, BNB, XRP, ADA, DOGE, AVAX, DOT, LINK, MATIC, LTC, SHIB, UNI, ATOM, NEAR, APT, ARB, OP, SUI, TON, TRX, PEPE, BONK, INJ, TIA, SEI, ICP, AAVE, MKR, FET, IMX, STX, HBAR, CRO, FIL, ALGO, VET, XTZ, XLM, XMR, and more — see `/api/coins`
-
 ## For AI agents
 
-Read `/llms.txt` first. Use `?format=agent` for token-efficient responses.  
+Read `/llms.txt` first. Use `?format=agent` for token-efficient responses.
 Pay via x402 USDC on Base — no API keys needed.
 
 ## Disclaimer

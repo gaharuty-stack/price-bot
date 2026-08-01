@@ -30,6 +30,31 @@ init_db()
 start_price_updater()
 
 
+@app.after_request
+def _log_traffic(response):
+    """Count free + paid hits so /health matches Railway traffic."""
+    try:
+        path = request.path or ""
+        if path.startswith("/admin"):
+            return response
+        ip = _client_ip()
+        paid = payment_was_settled(request) and response.status_code == 200
+        q = request.args.get("q") or request.args.get("coins") or path
+        # Avoid double-count on paid handlers that already log.
+        if path in ("/api/data", "/api/compare", "/api/trending") and response.status_code == 200:
+            return response
+        log_request(str(q)[:120], ip, response.status_code, paid=paid)
+    except Exception:
+        logger.exception("traffic log failed")
+    return response
+
+
+@app.errorhandler(Exception)
+def _unhandled(exc):
+    logger.exception("Unhandled error: %s", exc)
+    return jsonify({"error": "internal_error", "message": "temporary failure, retry"}), 503
+
+
 def payment_was_settled(req) -> bool:
     for header in ("X-Payment-Response", "X-PAYMENT-RESPONSE", "Payment-Response", "X-Payment-Tx-Hash"):
         if req.headers.get(header):
@@ -274,6 +299,9 @@ def trending():
 
     limit = min(request.args.get("limit", 5, type=int), 10)
     data = get_trending(limit)
+    if not data.get("gainers") and not data.get("losers"):
+        log_request("trending", ip, 503, request_id, paid)
+        return jsonify({"error": "upstream_unavailable", "message": "market snapshot empty"}), 503
 
     payload = {
         "status": "ok",
