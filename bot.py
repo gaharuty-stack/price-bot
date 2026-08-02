@@ -380,8 +380,25 @@ def _payment_info():
     }
 
 
+def _paid_guidance(kind: str) -> str:
+    if kind == "data":
+        return (
+            "Pay once with x402 USDC on Base, then GET /api/data?q=btc. "
+            "Default format=agent returns signal, S/R levels, regime, risk, edge_score, invalidation. "
+            "Try free /api/preview?q=btc first."
+        )
+    if kind == "compare":
+        return (
+            "Best value: compare 2–5 coins in one payment — GET /api/compare?coins=btc,eth,sol. "
+            "Returns per-coin agent packs + vs-BTC relative strength."
+        )
+    return (
+        "GET /api/trending?limit=5 after x402 payment for top gainers/losers among supported coins."
+    )
+
+
 def _paid_402():
-    return {"402": {"description": "Payment Required"}}
+    return {"402": {"description": "Payment Required — settle x402 USDC on Base, then retry"}}
 
 
 def _openapi_paths():
@@ -415,6 +432,33 @@ def _openapi_paths():
     # security: [] => AgentCash authMode "unprotected"
     free_security = []
     return {
+        "/health": {
+            "get": {
+                "operationId": "health",
+                "summary": "Service health and paid_request counters (free)",
+                "tags": ["Meta"],
+                "security": free_security,
+                "responses": {"200": {"description": "Health JSON"}},
+            }
+        },
+        "/llms.txt": {
+            "get": {
+                "operationId": "llmsTxt",
+                "summary": "Plain-text agent docs (free)",
+                "tags": ["Meta"],
+                "security": free_security,
+                "responses": {"200": {"description": "llms.txt"}},
+            }
+        },
+        "/openapi.json": {
+            "get": {
+                "operationId": "openapi",
+                "summary": "OpenAPI 3.1 spec with x-payment-info (free)",
+                "tags": ["Meta"],
+                "security": free_security,
+                "responses": {"200": {"description": "OpenAPI document"}},
+            }
+        },
         "/api/data": {
             "get": {
                 "operationId": "getCoinBrief",
@@ -452,6 +496,7 @@ def _openapi_paths():
                     **_paid_402(),
                 },
                 "x-payment-info": _payment_info(),
+                "x-guidance": _paid_guidance("data"),
                 "x402": legacy_x402,
             }
         },
@@ -487,6 +532,7 @@ def _openapi_paths():
                     **_paid_402(),
                 },
                 "x-payment-info": _payment_info(),
+                "x-guidance": _paid_guidance("compare"),
                 "x402": legacy_x402,
             }
         },
@@ -514,6 +560,7 @@ def _openapi_paths():
                     **_paid_402(),
                 },
                 "x-payment-info": _payment_info(),
+                "x-guidance": _paid_guidance("trending"),
                 "x402": legacy_x402,
             }
         },
@@ -592,7 +639,8 @@ def openapi_spec():
             ).strip(),
         },
     }
-    contact_email = os.environ.get("CONTACT_EMAIL", "").strip()
+    # Default contact email so AgentCash ownership stays visible even if Railway env drifts.
+    contact_email = os.environ.get("CONTACT_EMAIL", "gaharuty@gmail.com").strip()
     if contact_email:
         info["contact"]["email"] = contact_email
 

@@ -103,5 +103,5 @@ app.get("/api/compare", proxy);
 app.get("/api/trending", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`x402 gateway v13.2 on :${PORT} price=${PRICE_LABEL}`);
+  console.log(`x402 gateway v13.3 on :${PORT} price=${PRICE_LABEL}`);
 });

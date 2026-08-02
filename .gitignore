@@ -6,8 +6,10 @@ bot_stats.db
 
 # deps
 node_modules/
-gateway/node_modules/
+gateway/
 
-# promo local
+# promo local (deferred — do not ship auto-poster)
+promo.py
 promo_targets.json
+promo_targets.example.json
 promo_outbox/

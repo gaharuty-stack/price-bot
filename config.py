@@ -40,7 +40,7 @@ COINS = {
     "uniswap": "uniswap", "uni": "uniswap",
     "cosmos": "cosmos", "atom": "cosmos",
     "filecoin": "filecoin", "fil": "filecoin",
-    "near": "near-protocol", "near": "near-protocol",
+    "near": "near-protocol", "near-protocol": "near-protocol",
     "algorand": "algorand", "algo": "algorand",
     "vechain": "vechain", "vet": "vechain",
     "tezos": "tezos", "xtz": "tezos",
@@ -72,5 +72,5 @@ SERVICE_URL = os.environ.get(
     "https://price-bot-production-4d6a.up.railway.app",
 )
 
-VERSION = "13.3.0"
+VERSION = "13.3.1"
 MAX_COMPARE_COINS = 5

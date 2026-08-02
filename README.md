@@ -8,7 +8,7 @@ One call: **price + BUY/SELL/HOLD + support/resistance + regime + risk + invalid
 **Agent docs:** https://price-bot-production-4d6a.up.railway.app/llms.txt  
 **OpenAPI:** https://price-bot-production-4d6a.up.railway.app/openapi.json
 
-## Pricing (v13.3)
+## Pricing (v13.3.1)
 
 | Endpoint | Price |
 |----------|-------|

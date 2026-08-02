@@ -32,7 +32,7 @@ CG_TIMEOUT = 6
 
 
 def _headers() -> dict:
-    headers = {"User-Agent": "PriceBot/13.2", "Accept": "application/json"}
+    headers = {"User-Agent": "PriceBot/13.3", "Accept": "application/json"}
     if COINGECKO_API_KEY:
         headers["x-cg-demo-api-key"] = COINGECKO_API_KEY
     return headers
@@ -251,7 +251,8 @@ def get_coin_data(query: str) -> dict | None:
         logger.warning("OHLC fetch failed for %s: %s", coin_id, exc)
         ohlc = []
 
-    closes = [row[3] for row in ohlc] if ohlc else []
+    # CoinGecko OHLC: [ts, open, high, low, close] — close is index 4 (not 3/low).
+    closes = [float(row[4]) for row in ohlc if len(row) >= 5] if ohlc else []
     ticker = query.strip().upper()
     for alias, cid in COINS.items():
         if cid == coin_id and len(alias) <= 5:
