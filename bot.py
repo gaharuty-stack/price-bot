@@ -383,22 +383,42 @@ def _payment_info():
 def _paid_guidance(kind: str) -> str:
     if kind == "data":
         return (
+            "Use case: get a live BUY/SELL/HOLD trading signal for Bitcoin, Ethereum, or Solana. "
             "Pay once with x402 USDC on Base, then GET /api/data?q=btc. "
-            "Default format=agent returns signal, S/R levels, regime, risk, edge_score, invalidation. "
-            "Try free /api/preview?q=btc first."
+            "Default format=agent returns signal, support/resistance levels, regime, risk, "
+            "edge_score, invalidation, target and stop. "
+            "Free tease (price only): GET /api/preview?q=btc."
         )
     if kind == "compare":
         return (
+            "Use case: rank BTC vs ETH vs SOL in one call for an AI trading agent. "
             "Best value: compare 2–5 coins in one payment — GET /api/compare?coins=btc,eth,sol. "
-            "Returns per-coin agent packs + vs-BTC relative strength."
+            "Returns per-coin agent packs + vs-BTC relative strength + best/worst 24h."
         )
     return (
+        "Use case: find which cryptocurrencies are pumping or dumping today. "
         "GET /api/trending?limit=5 after x402 payment for top gainers/losers among supported coins."
     )
 
 
 def _paid_402():
-    return {"402": {"description": "Payment Required — settle x402 USDC on Base, then retry"}}
+    return {"402": {"description": "Payment Required — settle x402 USDC on Base, then retry with PAYMENT-SIGNATURE or X-PAYMENT"}}
+
+
+def _openapi_components():
+    return {
+        "securitySchemes": {
+            "x402": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "PAYMENT-SIGNATURE",
+                "description": (
+                    "x402 v2 payment proof (also accepts X-PAYMENT). "
+                    "Pay an offer from the HTTP 402 response body/accepts, then retry."
+                ),
+            }
+        }
+    }
 
 
 def _openapi_paths():
@@ -429,8 +449,9 @@ def _openapi_paths():
             "stop_loss": {"type": "number"},
         },
     }
-    # security: [] => AgentCash authMode "unprotected"
+    # security: [] => free; security: [{x402: []}] => AgentCash authMode "paid"
     free_security = []
+    paid_security = [{"x402": []}]
     return {
         "/health": {
             "get": {
@@ -463,16 +484,20 @@ def _openapi_paths():
             "get": {
                 "operationId": "getCoinBrief",
                 "summary": (
-                    "Bitcoin/ETH/SOL crypto price + BUY/SELL/HOLD TA signal — "
-                    "LLM-ready brief for AI trading agents (x402)"
+                    "Live crypto BUY/SELL/HOLD trading signal with support/resistance, "
+                    "regime, risk and invalidation — LLM-ready agent pack (x402)"
                 ),
                 "description": (
-                    "Returns current USD price, 24h change, RSI/MACD/Bollinger context, "
-                    "BUY/SELL/HOLD signal, confidence, reason, and action_hint for one coin "
-                    "(btc, eth, sol, and 40+ others). Optimized for LLM agents. "
-                    "Default format=agent. Pay per call with USDC on Base via x402."
+                    "Pay-per-call crypto intelligence for AI trading agents. "
+                    "Returns USD price, 24h change, BUY/SELL/HOLD signal, confidence, "
+                    "edge_score, RSI/MACD/Bollinger-derived reason, support and resistance "
+                    "levels, volatility regime, risk, invalidation line, target_price and "
+                    "stop_loss for one coin (btc, eth, sol, bitcoin, ethereum, and 40+ others). "
+                    "Use when you need an actionable directional signal, not a raw price dump. "
+                    "Default format=agent. Settle HTTP 402 with USDC on Base via x402, then retry."
                 ),
                 "tags": ["Trading", "Crypto", "Signals"],
+                "security": paid_security,
                 "parameters": [
                     {
                         "name": "q",
@@ -505,14 +530,17 @@ def _openapi_paths():
                 "operationId": "compareCoins",
                 "summary": (
                     "Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — "
-                    "best/worst 24h performer for AI agents"
+                    "BUY/SELL/HOLD briefs + vs-BTC relative strength in one payment"
                 ),
                 "description": (
-                    "Compare 2–5 cryptocurrencies in one paid call. Returns per-coin "
-                    "price + TA signal briefs and a summary of best/worst 24h performers. "
-                    "Example: coins=btc,eth,sol. Useful for portfolio ranking and agent decisions."
+                    "Best-value paid call for portfolio ranking agents. Compare 2–5 "
+                    "cryptocurrencies (example: coins=btc,eth,sol) in a single x402 payment. "
+                    "Returns per-coin price + BUY/SELL/HOLD agent packs, best/worst 24h "
+                    "performers, and vs-BTC relative strength so an agent can pick the "
+                    "strongest coin without multiple requests."
                 ),
                 "tags": ["Trading", "Crypto", "Compare"],
+                "security": paid_security,
                 "parameters": [
                     {
                         "name": "coins",
@@ -541,13 +569,15 @@ def _openapi_paths():
                 "operationId": "getTrending",
                 "summary": (
                     "Top crypto gainers and losers last 24h — "
-                    "trending movers for AI trading agents"
+                    "momentum scan for AI trading agents (x402)"
                 ),
                 "description": (
                     "Lists top gainers and losers among supported coins by 24h percent change. "
-                    "Use when an agent needs market movers, momentum scan, or what is pumping/dumping today."
+                    "Use when an agent needs market movers, a momentum scan, or what is "
+                    "pumping/dumping today before picking a coin for /api/data."
                 ),
                 "tags": ["Search", "Crypto", "Trending"],
+                "security": paid_security,
                 "parameters": [
                     {
                         "name": "limit",
@@ -576,10 +606,11 @@ def _openapi_paths():
         "/api/preview": {
             "get": {
                 "operationId": "previewBrief",
-                "summary": "Free Bitcoin/ETH crypto price + signal preview (no payment)",
+                "summary": "Free crypto spot price + 24h change tease (signal locked behind x402)",
                 "description": (
-                    "Free taste of the agent brief: price, 24h change, BUY/SELL/HOLD signal and reason. "
-                    "No action_hint/targets. Upgrade to /api/data for full brief."
+                    "Free tease for AI agents: current USD price and 24h change only. "
+                    "BUY/SELL/HOLD signal, levels, regime, risk and invalidation stay locked — "
+                    "upgrade to GET /api/data (or best-value /api/compare) after x402 payment."
                 ),
                 "tags": ["Search", "Crypto"],
                 "security": free_security,
@@ -591,7 +622,7 @@ def _openapi_paths():
                         "schema": {"type": "string", "minLength": 1, "example": "btc"},
                     },
                 ],
-                "responses": {"200": {"description": "Preview brief with upgrade hint"}},
+                "responses": {"200": {"description": "Price tease with upgrade hint to paid agent pack"}},
             }
         },
     }
@@ -616,20 +647,22 @@ def openapi_spec():
         "title": "Crypto Agent Brief API",
         "version": VERSION,
         "description": (
-            "Cheap x402 crypto intelligence for AI agents: price + BUY/SELL/HOLD + "
-            "support/resistance levels + volatility regime + risk + invalidation line. "
-            "Bitcoin, Ethereum, Solana and 40+ coins. "
-            f"Pay-per-call {PAYMENT['amount']} USDC on Base. Compare up to 5 coins in one call. "
-            "Free preview available."
+            "x402 pay-per-call crypto trading intelligence for AI agents. "
+            "Get live Bitcoin/ETH/SOL BUY/SELL/HOLD signals with support/resistance, "
+            "volatility regime, risk, edge_score and invalidation — not raw CoinGecko dumps. "
+            f"Price: {PAYMENT['amount']} USDC on Base per call. "
+            "Best value: compare up to 5 coins + vs-BTC strength in one payment. "
+            "Free routes use security: []. Paid routes require x402 (PAYMENT-SIGNATURE / X-PAYMENT) "
+            "after HTTP 402. Free tease: GET /api/preview?q=btc (price only). "
+            "Docs: /llms.txt."
         ),
         "x-guidance": (
-            "Unique agent pack: not raw prices — you get signal, S/R levels, regime, risk, "
-            "edge_score and invalidation in one cheap call. "
-            "Free: GET /api/preview?q=btc. "
-            "Paid single coin: GET /api/data?q=btc. "
-            "Paid compare (best value): GET /api/compare?coins=btc,eth,sol — multiple briefs + vs-BTC relative strength "
-            f"for one {PAYMENT['amount']} USDC payment. "
-            "Movers: GET /api/trending. Read /llms.txt."
+            "Workflow for AI agents: (1) Free tease GET /api/preview?q=btc for spot+24h. "
+            "(2) Pay x402 then GET /api/data?q=btc for full BUY/SELL/HOLD agent pack "
+            "(signal, S/R levels, regime, risk, edge_score, invalidation, target/stop). "
+            f"(3) Best value: GET /api/compare?coins=btc,eth,sol for multiple briefs + vs-BTC "
+            f"relative strength in one {PAYMENT['amount']} USDC payment. "
+            "(4) Momentum: GET /api/trending. Read /llms.txt."
         ),
         "x402": PAYMENT,
         "contact": {
@@ -648,6 +681,15 @@ def openapi_spec():
         "openapi": "3.1.0",
         "info": info,
         "servers": [{"url": SERVICE_URL}],
+        "tags": [
+            {"name": "Trading", "description": "BUY/SELL/HOLD crypto signals for agents"},
+            {"name": "Crypto", "description": "Bitcoin, Ethereum, Solana and 40+ coins"},
+            {"name": "Signals", "description": "Technical analysis agent packs"},
+            {"name": "Compare", "description": "Multi-coin ranking + vs-BTC strength"},
+            {"name": "Search", "description": "Coin list, preview, trending movers"},
+            {"name": "Meta", "description": "Health, OpenAPI, llms.txt"},
+        ],
+        "components": _openapi_components(),
         "paths": _openapi_paths(),
     })
 
@@ -657,7 +699,10 @@ def mcp_discovery():
     return jsonify({
         "name": "Crypto Agent Brief API",
         "version": VERSION,
-        "description": "LLM-ready crypto price + TA briefs. Use ?format=agent for concise answers.",
+        "description": (
+            "x402 crypto BUY/SELL/HOLD agent packs for Bitcoin/ETH/SOL. "
+            "Free /api/preview is price-only; pay for signal, S/R, regime, risk, invalidation."
+        ),
         "x402": PAYMENT,
         "endpoints": [
             {"path": "/api/preview", "method": "GET", "price": "0", "example": f"{SERVICE_URL}/api/preview?q=btc"},
@@ -674,29 +719,30 @@ def mcp_discovery():
 def llms_txt():
     text = f"""# Crypto Agent Brief API v{VERSION}
 
-> Cheap x402 crypto intelligence for AI agents — not raw CoinGecko dumps.
-> One call: price + BUY/SELL/HOLD + support/resistance + regime + risk + invalidation.
+> x402 crypto trading intelligence for AI agents — not raw CoinGecko dumps.
+> One paid call: BUY/SELL/HOLD + support/resistance + regime + risk + invalidation.
 
 ## Why this vs others
 - Most APIs sell price only or expensive essays
 - We sell a compact **agent pack** agents can act on
 - Compare up to 5 coins in **one** ${PAYMENT['amount']} payment (best value)
-- Free preview to try before paying
+- Free preview is price-only (signal locked) so you know what you buy
 
 ## Endpoints
-- Free preview → GET /api/preview?q=btc
+- Free price tease → GET /api/preview?q=btc
 - Full agent pack → GET /api/data?q=btc
 - Multi-coin + vs-BTC strength → GET /api/compare?coins=btc,eth,sol
 - Gainers/losers → GET /api/trending
 
-## Agent pack fields
+## Agent pack fields (paid)
 coin, price_usd, signal, confidence, edge_score, regime, risk,
 levels.support, levels.resistance, reason, action_hint, invalidation,
 target_price, stop_loss
 
 ## Pricing
-- Free: /api/preview, /api/coins, /llms.txt
+- Free: /api/preview (price+24h only), /api/coins, /llms.txt
 - Paid: {PAYMENT['amount']} USDC on Base (x402) per /api/data|/api/compare|/api/trending
+- Pay HTTP 402 with PAYMENT-SIGNATURE or X-PAYMENT, then retry
 
 ## Base URL
 {SERVICE_URL}
@@ -707,7 +753,17 @@ target_price, stop_loss
 @app.route("/robots.txt", methods=["GET"])
 def robots_txt():
     return make_response(
-        f"User-agent: *\nAllow: /\nAllow: /llms.txt\n\nSitemap: {SERVICE_URL}/openapi.json\n",
+        (
+            "User-agent: *\n"
+            "Allow: /\n"
+            "Allow: /llms.txt\n"
+            "Allow: /ai.txt\n"
+            "Allow: /openapi.json\n"
+            "Allow: /.well-known/\n"
+            "Allow: /api/preview\n"
+            "Allow: /api/coins\n"
+            f"\nSitemap: {SERVICE_URL}/openapi.json\n"
+        ),
         200,
         {"Content-Type": "text/plain"},
     )
@@ -719,7 +775,7 @@ def root():
         "service": "Crypto Agent Brief API",
         "version": VERSION,
         "status": "ok",
-        "tagline": "LLM-ready crypto briefs — not raw JSON dumps",
+        "tagline": "x402 BUY/SELL/HOLD agent packs — signal locked behind payment",
         "coins_supported": len(set(COINS.values())),
         "payment": PAYMENT,
         "endpoints": {

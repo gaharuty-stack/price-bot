@@ -2,9 +2,14 @@ User-agent: *
 Allow: /
 Allow: /.well-known/
 Allow: /api/coins
+Allow: /api/preview
 Allow: /openapi.json
+Allow: /llms.txt
+Allow: /ai.txt
 
-# Paid API for agents
-# GET /api/data?q=bitcoin — $0.001 USDC via x402
+# Paid agent API — $0.01 USDC via x402 on Base
+# GET /api/data?q=btc
+# GET /api/compare?coins=btc,eth,sol
+# GET /api/trending
 
 Sitemap: https://price-bot-production-4d6a.up.railway.app/openapi.json

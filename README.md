@@ -4,15 +4,15 @@ Cheap x402 crypto intelligence for AI agents — not raw CoinGecko dumps.
 One call: **price + BUY/SELL/HOLD + support/resistance + regime + risk + invalidation**.
 
 **Live:** https://price-bot-production-4d6a.up.railway.app  
-**Free preview:** https://price-bot-production-4d6a.up.railway.app/api/preview?q=btc  
+**Free preview (price only):** https://price-bot-production-4d6a.up.railway.app/api/preview?q=btc  
 **Agent docs:** https://price-bot-production-4d6a.up.railway.app/llms.txt  
 **OpenAPI:** https://price-bot-production-4d6a.up.railway.app/openapi.json
 
-## Pricing (v13.3.1)
+## Pricing (v13.4.0)
 
 | Endpoint | Price |
 |----------|-------|
-| `GET /api/preview?q=btc` | **Free** |
+| `GET /api/preview?q=btc` | **Free** (spot + 24h only; signal locked) |
 | `GET /api/data?q=btc` | **$0.01 USDC** |
 | `GET /api/compare?coins=btc,eth,sol` | **$0.01 USDC** (up to 5 coins) |
 | `GET /api/trending` | **$0.01 USDC** |

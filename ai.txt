@@ -1,14 +1,17 @@
 # ai.txt — machine-readable service description for AI agents
 
 service: Crypto Agent Brief API
-version: 13.0.0
+version: 13.4.0
 payment: x402 USDC on Base
-price: $0.001 per paid request
+price: $0.01 per paid request
 discovery: /.well-known/x402, /.well-known/mcp.json, /openapi.json, /llms.txt
 free_endpoints: /, /health, /api/coins, /api/preview
 paid_endpoints: GET /api/data, GET /api/compare, GET /api/trending
 try_first: GET /api/preview?q=btc
 example_paid: GET /api/data?q=btc&format=agent
+best_value: GET /api/compare?coins=btc,eth,sol&format=agent
 data_source: coingecko
 indicators: RSI, MACD, Bollinger Bands, ATR, Stochastic
+outputs: BUY/SELL/HOLD, edge_score, support/resistance, regime, risk, invalidation
 contact: https://github.com/gaharuty-stack/price-bot
+email: gaharuty@gmail.com

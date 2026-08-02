@@ -57,45 +57,75 @@ const paidRoute = (path, description, discovery) => ({
 });
 
 app.use(paymentMiddleware({
-  ...paidRoute("/api/data", "Bitcoin/ETH/SOL price + BUY/SELL/HOLD TA brief for AI agents (x402)", {
-    input: { q: "btc", format: "agent" },
-    inputSchema: {
-      properties: {
-        q: { type: "string", description: "Coin ticker: btc, eth, sol, bitcoin, …" },
-        format: { type: "string", enum: ["agent", "full"] },
+  ...paidRoute(
+    "/api/data",
+    "Live crypto BUY/SELL/HOLD trading signal with support/resistance, regime, risk, edge_score and invalidation for Bitcoin/ETH/SOL — LLM-ready agent pack via x402",
+    {
+      input: { q: "btc", format: "agent" },
+      inputSchema: {
+        properties: {
+          q: {
+            type: "string",
+            description: "Coin ticker for trading signal: btc, eth, sol, bitcoin, ethereum, …",
+          },
+          format: { type: "string", enum: ["agent", "full"] },
+        },
+        required: ["q"],
       },
-      required: ["q"],
-    },
-    output: {
-      example: {
-        coin: "BTC",
-        price_usd: 95000,
-        signal: "HOLD",
-        reason: "neutral RSI; MACD flat",
-        action_hint: "No strong edge.",
-      },
-    },
-  }),
-  ...paidRoute("/api/compare", "Compare Bitcoin vs Ethereum vs Solana — best/worst 24h for agents", {
-    input: { coins: "btc,eth,sol", format: "agent" },
-    inputSchema: {
-      properties: {
-        coins: { type: "string", description: "Comma-separated tickers e.g. btc,eth,sol" },
-        format: { type: "string", enum: ["agent", "full"] },
-      },
-      required: ["coins"],
-    },
-    output: { example: { status: "ok", results: [] } },
-  }),
-  ...paidRoute("/api/trending", "Top crypto gainers and losers 24h — trending movers for agents", {
-    input: { limit: "5" },
-    inputSchema: {
-      properties: {
-        limit: { type: "integer", description: "How many gainers/losers", default: 5 },
+      output: {
+        example: {
+          coin: "BTC",
+          price_usd: 95000,
+          signal: "HOLD",
+          confidence: 62,
+          edge_score: 64,
+          regime: "calm",
+          risk: "low",
+          levels: { support: 92000, resistance: 98000 },
+          reason: "neutral RSI; MACD flat",
+          action_hint: "No strong edge.",
+          invalidation: "break of support–resistance range",
+        },
       },
     },
-    output: { example: { gainers: [], losers: [] } },
-  }),
+  ),
+  ...paidRoute(
+    "/api/compare",
+    "Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — BUY/SELL/HOLD briefs + vs-BTC relative strength in one x402 payment",
+    {
+      input: { coins: "btc,eth,sol", format: "agent" },
+      inputSchema: {
+        properties: {
+          coins: {
+            type: "string",
+            description: "Comma-separated tickers to rank, e.g. btc,eth,sol",
+          },
+          format: { type: "string", enum: ["agent", "full"] },
+        },
+        required: ["coins"],
+      },
+      output: {
+        example: {
+          status: "ok",
+          summary: { best_performer: "SOL", best_vs_btc: "SOL", best_edge: "ETH" },
+          results: [],
+        },
+      },
+    },
+  ),
+  ...paidRoute(
+    "/api/trending",
+    "Top crypto gainers and losers last 24h — momentum scan for AI trading agents via x402",
+    {
+      input: { limit: "5" },
+      inputSchema: {
+        properties: {
+          limit: { type: "integer", description: "How many gainers/losers", default: 5 },
+        },
+      },
+      output: { example: { gainers: [], losers: [] } },
+    },
+  ),
 }, resourceServer));
 
 app.get("/api/data", proxy);
@@ -103,5 +133,5 @@ app.get("/api/compare", proxy);
 app.get("/api/trending", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`x402 gateway v13.3 on :${PORT} price=${PRICE_LABEL}`);
+  console.log(`x402 gateway v13.4 on :${PORT} price=${PRICE_LABEL}`);
 });

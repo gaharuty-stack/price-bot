@@ -183,6 +183,7 @@ def enrich_compare_with_relative(briefs: list[dict], btc_change: float | None) -
 
 
 def build_preview_brief(data: dict, query: str, service_url: str, price: str) -> dict:
+    """Free tease: spot + 24h only. Signal/TA stay behind x402."""
     brief = build_agent_brief(data)
     return {
         "status": "preview",
@@ -191,26 +192,39 @@ def build_preview_brief(data: dict, query: str, service_url: str, price: str) ->
             "coin": brief["coin"],
             "price_usd": brief["price_usd"],
             "change_24h": brief["change_24h"],
-            "signal": brief["signal"],
-            "regime": brief["regime"],
-            "risk": brief["risk"],
-            "reason": brief["reason"],
         },
+        "locked": [
+            "signal",
+            "confidence",
+            "edge_score",
+            "regime",
+            "risk",
+            "reason",
+            "levels",
+            "invalidation",
+            "action_hint",
+            "target_price",
+            "stop_loss",
+        ],
         "upgrade": {
             "endpoint": f"{service_url}/api/data?q={query}",
             "price": f"{price} USDC",
+            "pay": "x402 USDC on Base",
             "includes": [
+                "BUY/SELL/HOLD signal",
+                "confidence + edge_score",
+                "regime + risk",
+                "support/resistance levels",
+                "invalidation + target/stop",
                 "action_hint",
-                "confidence",
-                "edge_score",
-                "levels.support/resistance",
-                "invalidation",
-                "target_price",
-                "stop_loss",
             ],
             "why_unique": (
-                "One cheap call returns price + TA signal + S/R levels + regime/risk "
-                "+ invalidation line — not a raw CoinGecko dump."
+                "One cheap call returns an actionable agent pack: signal + S/R + "
+                "regime/risk + invalidation — not a raw CoinGecko dump."
+            ),
+            "compare_deal": (
+                f"{service_url}/api/compare?coins=btc,eth,sol — up to 5 coins "
+                f"+ vs-BTC strength for one {price} USDC payment"
             ),
         },
     }
