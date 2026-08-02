@@ -20,6 +20,45 @@ const app = express();
 // Railway terminates TLS; without this, x402 resource URLs become http:// and break settle/indexing.
 app.set("trust proxy", 1);
 
+function decodePaymentRequiredHeader(value) {
+  if (!value || typeof value !== "string") return null;
+  try {
+    const pad = "=".repeat((4 - (value.length % 4)) % 4);
+    return JSON.parse(Buffer.from(value + pad, "base64url").toString("utf8"));
+  } catch {
+    try {
+      return JSON.parse(Buffer.from(value, "base64").toString("utf8"));
+    } catch {
+      return null;
+    }
+  }
+}
+
+// @x402/express puts the challenge in Payment-Required and often sends body {}.
+// Syra/AgentCash/x402scan clients expect the same JSON in the 402 response body.
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode === 402) {
+      const empty =
+        body == null ||
+        (typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 0);
+      if (empty) {
+        const header =
+          res.getHeader("payment-required") ||
+          res.getHeader("Payment-Required") ||
+          res.getHeader("PAYMENT-REQUIRED");
+        const decoded = decodePaymentRequiredHeader(
+          Array.isArray(header) ? header[0] : header,
+        );
+        if (decoded) return originalJson(decoded);
+      }
+    }
+    return originalJson(body);
+  };
+  next();
+});
+
 const proxy = createProxyMiddleware({
   target: FLASK_TARGET,
   changeOrigin: true,
@@ -35,6 +74,7 @@ const freeRoutes = [
   "/api/preview",
   "/openapi.json",
   "/.well-known/x402",
+  "/.well-known/x402.json",
   "/.well-known/mcp.json",
   "/llms.txt",
   "/ai.txt",

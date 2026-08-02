@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import time
@@ -556,7 +557,29 @@ def _openapi_paths():
                     },
                 ],
                 "responses": {
-                    "200": {"description": "Multi-coin comparison with best/worst summary"},
+                    "200": {
+                        "description": "Multi-coin comparison with best/worst summary",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {"type": "string"},
+                                        "coins": {"type": "array", "items": agent_brief_schema},
+                                        "summary": {
+                                            "type": "object",
+                                            "properties": {
+                                                "best_performer": {"type": "string"},
+                                                "worst_performer": {"type": "string"},
+                                                "best_edge": {"type": "string"},
+                                                "best_vs_btc": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                }
+                            }
+                        },
+                    },
                     **_paid_402(),
                 },
                 "x-payment-info": _payment_info(),
@@ -586,7 +609,22 @@ def _openapi_paths():
                     }
                 ],
                 "responses": {
-                    "200": {"description": "Trending gainers and losers"},
+                    "200": {
+                        "description": "Trending gainers and losers",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {"type": "string"},
+                                        "gainers": {"type": "array", "items": {"type": "object"}},
+                                        "losers": {"type": "array", "items": {"type": "object"}},
+                                        "summary": {"type": "string"},
+                                    },
+                                }
+                            }
+                        },
+                    },
                     **_paid_402(),
                 },
                 "x-payment-info": _payment_info(),
@@ -628,9 +666,26 @@ def _openapi_paths():
     }
 
 
+# Minimal 16x16 ICO — AgentCash/x402scan treat missing/invalid favicon as a discovery warning.
+_FAVICON_ICO = base64.b64decode(
+    "AAABAAEAEBAAAAEAIABIBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/IsVe/yLFXv8ixV7/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+)
+
+
 @app.route("/favicon.ico", methods=["GET"])
+def favicon_ico():
+    return make_response(
+        _FAVICON_ICO,
+        200,
+        {
+            "Content-Type": "image/x-icon",
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
+
+
 @app.route("/favicon.svg", methods=["GET"])
-def favicon():
+def favicon_svg():
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
         '<rect width="64" height="64" rx="12" fill="#0f172a"/>'
@@ -642,6 +697,7 @@ def favicon():
 
 @app.route("/openapi.json", methods=["GET"])
 @app.route("/.well-known/x402", methods=["GET"])
+@app.route("/.well-known/x402.json", methods=["GET"])
 def openapi_spec():
     info = {
         "title": "Crypto Agent Brief API",

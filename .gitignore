@@ -8,6 +8,14 @@ bot_stats.db
 node_modules/
 gateway/
 
+# local audit artifacts
+openapi.live.json
+favicon.b64.txt
+favicon.ico
+health_body.txt
+preview_body.txt
+data_body.txt
+
 # promo local (deferred — do not ship auto-poster)
 promo.py
 promo_targets.json

@@ -9,6 +9,7 @@
     "/health",
     "/openapi.json",
     "/.well-known/x402",
+    "/.well-known/x402.json",
     "/.well-known/mcp.json",
     "/api/coins",
     "/api/preview",
