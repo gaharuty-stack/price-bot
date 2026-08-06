@@ -6,7 +6,8 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 
 const PAY_TO = process.env.PAY_TO || "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915";
-const PRICE = process.env.PRICE_USDC || "0.001";
+// Prefer PRICE_USDC_OVERRIDE so a stale Railway PRICE_USDC=0.01 cannot silently win.
+const PRICE = process.env.PRICE_USDC_OVERRIDE || "0.001";
 const PRICE_LABEL = PRICE.startsWith("$") ? PRICE : `$${PRICE}`;
 const FLASK_TARGET = process.env.FLASK_TARGET || "http://127.0.0.1:5000";
 const PORT = Number(process.env.PORT || 8080);

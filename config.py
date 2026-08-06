@@ -5,8 +5,9 @@ PAY_TO = os.environ.get("PAY_TO", "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 PAYMENT = {
-    # $0.001 undercuts the crowded $0.01 signal market and raises pay-through rates.
-    "amount": os.environ.get("PRICE_USDC", "0.001"),
+    # Launch price: undercut crowded $0.01 signal APIs.
+    # Prefer PRICE_USDC_OVERRIDE so a stale Railway PRICE_USDC=0.01 cannot silently win.
+    "amount": os.environ.get("PRICE_USDC_OVERRIDE") or "0.001",
     "currency": "USDC",
     "network": os.environ.get("PAYMENT_NETWORK", "base"),
     "receiver": PAY_TO,
