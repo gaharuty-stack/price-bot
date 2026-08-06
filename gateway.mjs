@@ -7,7 +7,8 @@ import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 
 const PAY_TO = process.env.PAY_TO || "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915";
 // Tiered pricing: entry signal vs hero scan/compare bundles.
-const PRICE_SIGNAL = process.env.PRICE_SIGNAL_USDC || process.env.PRICE_USDC_OVERRIDE || "0.01";
+// Micro entry ($0.001) + bundle hero ($0.05). Bare PRICE_USDC is ignored on purpose.
+const PRICE_SIGNAL = process.env.PRICE_SIGNAL_USDC || process.env.PRICE_USDC_OVERRIDE || "0.001";
 const PRICE_BUNDLE = process.env.PRICE_BUNDLE_USDC || "0.05";
 const PRICE_SCAN = process.env.PRICE_SCAN_USDC || PRICE_BUNDLE;
 const label = (p) => (String(p).startsWith("$") ? String(p) : `$${p}`);
@@ -279,6 +280,6 @@ app.get("/api/v1/signal/:coin", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(
-    `x402 gateway v15.0 on :${PORT} signal=${label(PRICE_SIGNAL)} scan=${label(PRICE_SCAN)}`,
+    `x402 gateway v15.1 on :${PORT} signal=${label(PRICE_SIGNAL)} scan=${label(PRICE_SCAN)}`,
   );
 });

@@ -1,0 +1,24 @@
+name: Keepalive
+
+# Pings free endpoints so Railway stays warm and AgentCash can re-index.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Warm free endpoints
+        run: |
+          set -euo pipefail
+          BASE="${SERVICE_URL:-https://price-bot-production-4d6a.up.railway.app}"
+          for path in /health /api/pulse /api/preview?q=btc /openapi.json /guidance; do
+            code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 25 "$BASE$path" || echo "000")
+            echo "$path -> $code"
+            test "$code" = "200"
+          done
+        env:
+          SERVICE_URL: https://price-bot-production-4d6a.up.railway.app

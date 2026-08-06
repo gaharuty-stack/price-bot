@@ -4,9 +4,10 @@ SECRET_KEY = os.environ.get("INTEGRITY_SECRET", "change-me-in-production")
 PAY_TO = os.environ.get("PAY_TO", "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
-# Tiered pricing — $0.001 won search rank but produced $0 revenue.
-# Entry signal matches market ($0.01); bundles justify $0.05 for agents.
-PRICE_SIGNAL = os.environ.get("PRICE_SIGNAL_USDC") or os.environ.get("PRICE_USDC_OVERRIDE") or "0.01"
+# Hybrid pricing for trickle revenue without buyer wallet funding:
+# - micro signal ($0.001) matches AgentCash search cache + low friction
+# - scan/compare ($0.05) is the real money product
+PRICE_SIGNAL = os.environ.get("PRICE_SIGNAL_USDC") or os.environ.get("PRICE_USDC_OVERRIDE") or "0.001"
 PRICE_BUNDLE = os.environ.get("PRICE_BUNDLE_USDC") or "0.05"
 PRICE_SCAN = os.environ.get("PRICE_SCAN_USDC") or PRICE_BUNDLE
 
@@ -85,7 +86,7 @@ SERVICE_URL = os.environ.get(
     "https://price-bot-production-4d6a.up.railway.app",
 )
 
-VERSION = "15.0.0"
+VERSION = "15.1.0"
 MAX_COMPARE_COINS = 5
 # Coins with dedicated OpenAPI paths so AgentCash search matches "/signal/BTC" queries.
 SIGNAL_INDEX_COINS = ("BTC", "ETH", "SOL", "XRP", "DOGE")

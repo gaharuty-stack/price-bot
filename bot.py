@@ -190,6 +190,13 @@ def health():
         "paid_24h": stats.get("paid_24h", 0),
         "conversion_pct": stats.get("conversion_pct", 0),
         "pricing": PAYMENT_TIERS,
+        "earnings": {
+            "pay_to": PAYMENT["receiver"],
+            "network": "base",
+            "asset": "USDC",
+            "note": "x402 settles USDC to pay_to — you do not need AgentCash funded to receive",
+            "check": f"https://basescan.org/address/{PAYMENT['receiver']}",
+        },
         "avg_response_ms": avg_ms,
         "last_price_update": get_last_snapshot_at(),
         "data_source": "coingecko",
@@ -558,7 +565,7 @@ def _payment_info():
 def _agent_guidance_text() -> str:
     return (
         "Crypto Agent Brief API — actionable x402 setups for trading agents "
-        f"(signal {PAYMENT_TIERS['signal']} USDC, scan/compare {PAYMENT_TIERS['scan']} USDC on Base).\n"
+        f"(micro signal {PAYMENT_TIERS['signal']} USDC, hero scan/compare {PAYMENT_TIERS['scan']} USDC on Base).\n"
         "Workflow:\n"
         "1) Free pulse: GET /api/pulse — how many tradeable setups exist right now (directions locked).\n"
         "2) Free tease: GET /api/preview?q=btc — spot+24h + setup_hint; signal locked.\n"
@@ -1241,10 +1248,19 @@ def root():
         "service": "Crypto Agent Brief API",
         "version": VERSION,
         "status": "ok",
-        "tagline": f"x402 setup scanner — /api/scan {PAYMENT_TIERS['scan']} USDC",
+        "tagline": (
+            f"x402 setup scanner — /api/scan {PAYMENT_TIERS['scan']} USDC; "
+            f"micro signal {PAYMENT_TIERS['signal']} USDC"
+        ),
         "coins_supported": len(set(COINS.values())),
         "payment": PAYMENT,
         "pricing": PAYMENT_TIERS,
+        "earnings": {
+            "pay_to": PAYMENT["receiver"],
+            "network": "base",
+            "asset": "USDC",
+            "check": f"https://basescan.org/address/{PAYMENT['receiver']}",
+        },
         "guidance": "/guidance",
         "endpoints": {
             "free": [

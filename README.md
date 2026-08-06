@@ -1,45 +1,37 @@
 # Crypto Agent Brief API
 
-x402 crypto **setup scanner** for AI agents — not raw CoinGecko dumps.
-
-**Hero product:** one paid call returns ranked BUY/SELL setups with confluence, `tradeable_now`, S/R, ATR targets.
+x402 crypto **setup scanner** for AI agents. USDC settles to your `PAY_TO` wallet on Base — you do **not** need AgentCash funded to receive money.
 
 **Live:** https://price-bot-production-4d6a.up.railway.app  
-**Best paid call:** https://price-bot-production-4d6a.up.railway.app/api/scan  
-**Free pulse:** https://price-bot-production-4d6a.up.railway.app/api/pulse  
-**Free preview:** https://price-bot-production-4d6a.up.railway.app/api/preview?q=btc  
-**Guidance:** https://price-bot-production-4d6a.up.railway.app/guidance  
+**Hero paid:** `/api/scan`  
+**Free FOMO:** `/api/pulse`  
+**Check earnings:** https://basescan.org/address/0x3f10530c86e6a1d26edbf27b6b6e660c77d79915  
 
-## Pricing (v15.0.0)
+## Pricing (v15.1)
 
-| Endpoint | Price |
-|----------|-------|
-| `GET /api/pulse` | **Free** (setup count FOMO; directions locked) |
-| `GET /api/preview?q=btc` | **Free** (spot + 24h + setup_hint) |
-| `GET /api/scan` | **$0.05 USDC** — hero: market-wide setups |
-| `GET /api/compare?coins=btc,eth,sol` | **$0.05 USDC** |
-| `GET /signal/BTC` (also ETH/SOL) | **$0.01 USDC** |
-| `GET /api/trending` | **$0.01 USDC** |
-| `/guidance`, `/api/coins`, `/health`, `/llms.txt` | Free |
+| Endpoint | Price | Why |
+|----------|-------|-----|
+| `GET /api/pulse` | Free | Setup-count FOMO |
+| `GET /api/preview?q=btc` | Free | Spot tease, signal locked |
+| `GET /signal/BTC` | **$0.001** | Micro entry (trickle) |
+| `GET /api/trending` | **$0.001** | Micro entry |
+| `GET /api/scan` | **$0.05** | Real money — market setups |
+| `GET /api/compare` | **$0.05** | Multi-coin + vs-BTC |
 
-Network: **Base**. Facilitator: **PayAI**.
+## Money flow
 
-## Why this sells
+```text
+Other AI agents → pay x402 USDC on Base → your PAY_TO wallet
+```
 
-| Weak API | This API |
-|----------|----------|
-| One-coin coin-flip | `/api/scan` ranks what to trade next |
-| Price dump | confluence + `tradeable_now` |
-| Fixed ±2% targets | ATR-based target/stop |
-| Race-to-$0.001 | Honest tiers agents can budget |
+AgentCash is only a *buyer* tool. Receiving uses `PAY_TO` + PayAI facilitator.
 
 ## Quick start
 
 ```bash
 curl "https://price-bot-production-4d6a.up.railway.app/api/pulse"
-curl "https://price-bot-production-4d6a.up.railway.app/api/preview?q=btc"
-curl "https://price-bot-production-4d6a.up.railway.app/guidance"
-# Paid routes return HTTP 402 until settled via x402 USDC on Base:
+curl "https://price-bot-production-4d6a.up.railway.app/health"
+# Paid → HTTP 402 until x402 settle:
 # GET /api/scan
 # GET /signal/BTC
 ```
