@@ -53,7 +53,6 @@ def _levels_from_ohlc(ohlc: list, price: float) -> dict:
         }
     support = min(lows)
     resistance = max(highs)
-    # Keep levels on the useful side of spot when possible
     if support >= price:
         support = min(lows + [price * 0.98])
     if resistance <= price:
@@ -81,7 +80,6 @@ def _regime_and_risk(price: float, atr: float, change_24h: float, confidence: fl
     else:
         risk = "low"
 
-    # Edge score: confidence adjusted by regime clarity
     edge = int(confidence)
     if regime == "calm" and confidence >= 60:
         edge = min(95, edge + 5)
@@ -101,6 +99,13 @@ def build_agent_brief(data: dict) -> dict:
     price = data["price_usd"]
     levels = _levels_from_ohlc(data.get("ohlc") or [], price)
     regime, risk, edge_score = _regime_and_risk(price, atr, change, float(data["confidence"]))
+    confluence = int(data.get("confluence") or 0)
+    tradeable = bool(data.get("tradeable_now"))
+    # Boost edge when several indicators agree.
+    if tradeable and confluence >= 3:
+        edge_score = min(95, edge_score + 6)
+    elif confluence <= 1 and signal != "HOLD":
+        edge_score = max(25, edge_score - 6)
 
     parts = [
         _rsi_label(rsi),
@@ -108,18 +113,21 @@ def build_agent_brief(data: dict) -> dict:
         _bollinger_label(price, bollinger),
         f"24h change {change:+.2f}%",
         f"regime {regime}",
+        f"confluence {confluence}",
     ]
     reason = "; ".join(parts)
 
     if signal == "BUY":
         action_hint = (
-            f"Bullish bias ({data['confidence']}% conf, edge {edge_score}). "
+            f"{'TRADEABLE' if tradeable else 'Weak'} bullish bias "
+            f"({data['confidence']}% conf, edge {edge_score}, confluence {confluence}). "
             f"Target ${_smart_price(data['target_price'])}, stop ${_smart_price(data['stop_loss'])}. "
             f"Invalidation: daily close below support {levels['support']}."
         )
     elif signal == "SELL":
         action_hint = (
-            f"Bearish bias ({data['confidence']}% conf, edge {edge_score}). "
+            f"{'TRADEABLE' if tradeable else 'Weak'} bearish bias "
+            f"({data['confidence']}% conf, edge {edge_score}, confluence {confluence}). "
             f"Target ${_smart_price(data['target_price'])}, stop ${_smart_price(data['stop_loss'])}. "
             f"Invalidation: daily close above resistance {levels['resistance']}."
         )
@@ -136,6 +144,8 @@ def build_agent_brief(data: dict) -> dict:
         "signal": signal,
         "confidence": data["confidence"],
         "edge_score": edge_score,
+        "confluence": confluence,
+        "tradeable_now": tradeable,
         "regime": regime,
         "risk": risk,
         "levels": levels,
@@ -167,6 +177,7 @@ def enrich_compare_with_relative(briefs: list[dict], btc_change: float | None) -
             "vs_btc_24h": vs_btc,
             "signal": b.get("signal"),
             "edge_score": b.get("edge_score"),
+            "tradeable_now": b.get("tradeable_now"),
             "risk": b.get("risk"),
         })
     by_edge = sorted(ranked, key=lambda r: (r.get("edge_score") or 0), reverse=True)
@@ -175,18 +186,17 @@ def enrich_compare_with_relative(briefs: list[dict], btc_change: float | None) -
         key=lambda r: (r["vs_btc_24h"] if r["vs_btc_24h"] is not None else r["change_24h"]),
         reverse=True,
     )
+    tradeable = [r for r in ranked if r.get("tradeable_now")]
     return {
         "relative": ranked,
         "best_edge": by_edge[0]["coin"] if by_edge else None,
         "best_vs_btc": by_rel[0]["coin"] if by_rel else None,
+        "tradeable_count": len(tradeable),
     }
 
 
-def build_preview_brief(data: dict, query: str, service_url: str, price: str) -> dict:
-    """Free tease: spot + 24h only. Signal/TA stay behind x402.
-
-    Teaser fields create urgency without giving away BUY/SELL.
-    """
+def build_preview_brief(data: dict, query: str, service_url: str, price: str, scan_price: str) -> dict:
+    """Free tease: spot + 24h only. Signal/TA stay behind x402."""
     brief = build_agent_brief(data)
     edge = int(brief.get("edge_score") or 0)
     if edge >= 70:
@@ -204,18 +214,21 @@ def build_preview_brief(data: dict, query: str, service_url: str, price: str) ->
             "price_usd": brief["price_usd"],
             "change_24h": brief["change_24h"],
         },
-        # Hint that a ready signal exists — without revealing direction.
         "teaser": {
             "signal_ready": True,
             "edge_band": edge_band,
             "risk": brief.get("risk"),
             "regime": brief.get("regime"),
+            "setup_hint": "tradeable" if brief.get("tradeable_now") else "weak_or_hold",
             "unlock": f"GET {service_url}/signal/{coin} — BUY/SELL/HOLD + S/R + invalidation",
+            "best_value": f"GET {service_url}/api/scan — top BUY/SELL setups across liquid coins ({scan_price} USDC)",
         },
         "locked": [
             "signal",
             "confidence",
             "edge_score",
+            "confluence",
+            "tradeable_now",
             "reason",
             "levels",
             "invalidation",
@@ -225,26 +238,19 @@ def build_preview_brief(data: dict, query: str, service_url: str, price: str) ->
         ],
         "upgrade": {
             "endpoint": f"{service_url}/signal/{coin}",
-            "alt_endpoints": [
-                f"{service_url}/api/data?q={query}",
-                f"{service_url}/trade-signal?q={query}",
-            ],
             "price": f"{price} USDC",
+            "scan": {
+                "endpoint": f"{service_url}/api/scan",
+                "price": f"{scan_price} USDC",
+                "why": "One payment → ranked tradeable BUY/SELL setups across liquid majors",
+            },
             "pay": "x402 USDC on Base",
             "includes": [
                 "BUY/SELL/HOLD signal",
-                "confidence + edge_score",
+                "confluence + tradeable_now",
                 "support/resistance levels",
-                "invalidation + target/stop",
-                "action_hint",
+                "ATR-based target/stop",
+                "invalidation + action_hint",
             ],
-            "why_unique": (
-                f"Cheapest actionable agent pack at {price} USDC: signal + S/R + "
-                "invalidation — not a raw CoinGecko dump."
-            ),
-            "compare_deal": (
-                f"{service_url}/api/compare?coins=btc,eth,sol — up to 5 coins "
-                f"+ vs-BTC strength for one {price} USDC payment"
-            ),
         },
     }

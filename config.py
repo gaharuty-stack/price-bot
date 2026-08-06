@@ -4,10 +4,14 @@ SECRET_KEY = os.environ.get("INTEGRITY_SECRET", "change-me-in-production")
 PAY_TO = os.environ.get("PAY_TO", "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
+# Tiered pricing — $0.001 won search rank but produced $0 revenue.
+# Entry signal matches market ($0.01); bundles justify $0.05 for agents.
+PRICE_SIGNAL = os.environ.get("PRICE_SIGNAL_USDC") or os.environ.get("PRICE_USDC_OVERRIDE") or "0.01"
+PRICE_BUNDLE = os.environ.get("PRICE_BUNDLE_USDC") or "0.05"
+PRICE_SCAN = os.environ.get("PRICE_SCAN_USDC") or PRICE_BUNDLE
+
 PAYMENT = {
-    # Launch price: undercut crowded $0.01 signal APIs.
-    # Prefer PRICE_USDC_OVERRIDE so a stale Railway PRICE_USDC=0.01 cannot silently win.
-    "amount": os.environ.get("PRICE_USDC_OVERRIDE") or "0.001",
+    "amount": PRICE_SIGNAL,
     "currency": "USDC",
     "network": os.environ.get("PAYMENT_NETWORK", "base"),
     "receiver": PAY_TO,
@@ -15,6 +19,13 @@ PAYMENT = {
         "X402_FACILITATOR_URL",
         "https://facilitator.payai.network",
     ),
+}
+
+PAYMENT_TIERS = {
+    "signal": PRICE_SIGNAL,
+    "trending": PRICE_SIGNAL,
+    "compare": PRICE_BUNDLE,
+    "scan": PRICE_SCAN,
 }
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
@@ -74,7 +85,25 @@ SERVICE_URL = os.environ.get(
     "https://price-bot-production-4d6a.up.railway.app",
 )
 
-VERSION = "14.0.0"
+VERSION = "15.0.0"
 MAX_COMPARE_COINS = 5
 # Coins with dedicated OpenAPI paths so AgentCash search matches "/signal/BTC" queries.
 SIGNAL_INDEX_COINS = ("BTC", "ETH", "SOL", "XRP", "DOGE")
+# Universe scanned by /api/scan (hot + liquid names).
+SCAN_COINS = (
+    "bitcoin",
+    "ethereum",
+    "solana",
+    "binancecoin",
+    "ripple",
+    "dogecoin",
+    "cardano",
+    "avalanche-2",
+    "chainlink",
+    "sui",
+    "the-open-network",
+    "near-protocol",
+    "arbitrum",
+    "aave",
+    "pepe",
+)

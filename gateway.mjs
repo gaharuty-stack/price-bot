@@ -6,9 +6,11 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 
 const PAY_TO = process.env.PAY_TO || "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915";
-// Prefer PRICE_USDC_OVERRIDE so a stale Railway PRICE_USDC=0.01 cannot silently win.
-const PRICE = process.env.PRICE_USDC_OVERRIDE || "0.001";
-const PRICE_LABEL = PRICE.startsWith("$") ? PRICE : `$${PRICE}`;
+// Tiered pricing: entry signal vs hero scan/compare bundles.
+const PRICE_SIGNAL = process.env.PRICE_SIGNAL_USDC || process.env.PRICE_USDC_OVERRIDE || "0.01";
+const PRICE_BUNDLE = process.env.PRICE_BUNDLE_USDC || "0.05";
+const PRICE_SCAN = process.env.PRICE_SCAN_USDC || PRICE_BUNDLE;
+const label = (p) => (String(p).startsWith("$") ? String(p) : `$${p}`);
 const FLASK_TARGET = process.env.FLASK_TARGET || "http://127.0.0.1:5000";
 const PORT = Number(process.env.PORT || 8080);
 const NETWORK = "eip155:8453";
@@ -73,6 +75,7 @@ const freeRoutes = [
   "/guidance",
   "/api/coins",
   "/api/preview",
+  "/api/pulse",
   "/openapi.json",
   "/.well-known/x402",
   "/.well-known/x402.json",
@@ -88,9 +91,9 @@ for (const route of freeRoutes) {
   app.get(route, proxy);
 }
 
-const paidRoute = (path, description, discovery) => ({
+const paidRoute = (path, price, description, discovery) => ({
   [`GET ${path}`]: {
-    accepts: [{ scheme: "exact", price: PRICE_LABEL, network: NETWORK, payTo: PAY_TO }],
+    accepts: [{ scheme: "exact", price: label(price), network: NETWORK, payTo: PAY_TO }],
     description,
     mimeType: "application/json",
     extensions: declareDiscoveryExtension(discovery),
@@ -119,6 +122,8 @@ const signalDiscovery = (exampleCoin) => ({
       signal: "HOLD",
       confidence: 62,
       edge_score: 64,
+      confluence: 2,
+      tradeable_now: false,
       regime: "calm",
       risk: "low",
       levels: { support: 92000, resistance: 98000 },
@@ -133,15 +138,43 @@ const signalDiscovery = (exampleCoin) => ({
 
 const signalDesc = (coin) =>
   coin
-    ? `Returns a trading signal for ${coin} (BUY/SELL/HOLD) with support/resistance, edge_score, invalidation, target and stop — ${PRICE_LABEL} USDC x402 on Base`
-    : `Live crypto BUY/SELL/HOLD trading signal with support/resistance, regime, risk, edge_score and invalidation — ${PRICE_LABEL} USDC x402 agent pack`;
+    ? `Returns a trading signal for ${coin} (BUY/SELL/HOLD) with confluence, tradeable_now, S/R, ATR target/stop — ${label(PRICE_SIGNAL)} USDC x402 on Base`
+    : `Live crypto BUY/SELL/HOLD trading signal with confluence, tradeable_now, S/R, regime, risk, edge_score — ${label(PRICE_SIGNAL)} USDC x402`;
 
-// Concrete /signal/BTC paths index better in AgentCash than generic /api/data.
 const indexCoins = ["BTC", "ETH", "SOL", "XRP", "DOGE"];
 const paidRoutes = {
   ...paidRoute(
+    "/api/scan",
+    PRICE_SCAN,
+    `Market-wide BUY/SELL setup scanner for AI agents — ranked tradeable setups with confluence + ATR targets — ${label(PRICE_SCAN)} USDC x402`,
+    {
+      input: { limit: "5" },
+      inputSchema: {
+        properties: {
+          limit: {
+            type: "integer",
+            description: "How many top buys and top sells to return",
+            default: 5,
+          },
+        },
+      },
+      output: {
+        example: {
+          status: "ok",
+          scanned: 15,
+          tradeable_count: 3,
+          top_buys: [signalDiscovery("SOL").output.example],
+          top_sells: [],
+          best_setup: signalDiscovery("SOL").output.example,
+          summary: "3 tradeable setups / 15 scanned. Best: SOL BUY.",
+        },
+      },
+    },
+  ),
+  ...paidRoute(
     "/api/data",
-    `Legacy wrapped agent pack (prefer /signal/BTC) — ${PRICE_LABEL} USDC x402`,
+    PRICE_SIGNAL,
+    `Legacy wrapped agent pack (prefer /api/scan or /signal/BTC) — ${label(PRICE_SIGNAL)} USDC x402`,
     {
       input: { q: "btc", format: "agent" },
       inputSchema: {
@@ -154,10 +187,11 @@ const paidRoutes = {
       output: { example: { status: "ok", data: signalDiscovery("BTC").output.example } },
     },
   ),
-  ...paidRoute("/api/signal", signalDesc(), signalDiscovery()),
-  ...paidRoute("/trade-signal", signalDesc(), signalDiscovery()),
+  ...paidRoute("/api/signal", PRICE_SIGNAL, signalDesc(), signalDiscovery()),
+  ...paidRoute("/trade-signal", PRICE_SIGNAL, signalDesc(), signalDiscovery()),
   ...paidRoute(
     "/signal/:coin",
+    PRICE_SIGNAL,
     signalDesc(),
     {
       inputSchema: {
@@ -171,6 +205,7 @@ const paidRoutes = {
   ),
   ...paidRoute(
     "/api/v1/signal/:coin",
+    PRICE_SIGNAL,
     signalDesc(),
     {
       inputSchema: {
@@ -184,7 +219,8 @@ const paidRoutes = {
   ),
   ...paidRoute(
     "/api/compare",
-    `Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — BUY/SELL/HOLD + vs-BTC strength in one ${PRICE_LABEL} x402 payment`,
+    PRICE_BUNDLE,
+    `Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — BUY/SELL/HOLD + vs-BTC strength in one ${label(PRICE_BUNDLE)} x402 payment`,
     {
       input: { coins: "btc,eth,sol", format: "agent" },
       inputSchema: {
@@ -208,7 +244,8 @@ const paidRoutes = {
   ),
   ...paidRoute(
     "/api/trending",
-    `Top crypto gainers and losers last 24h — momentum scan for AI trading agents via x402 (${PRICE_LABEL})`,
+    PRICE_SIGNAL,
+    `Top crypto gainers and losers last 24h — momentum list for AI trading agents via x402 (${label(PRICE_SIGNAL)})`,
     {
       input: { limit: "5" },
       inputSchema: {
@@ -224,13 +261,14 @@ const paidRoutes = {
 for (const coin of indexCoins) {
   Object.assign(
     paidRoutes,
-    paidRoute(`/signal/${coin}`, signalDesc(coin), signalDiscovery(coin)),
-    paidRoute(`/api/v1/signal/${coin}`, signalDesc(coin), signalDiscovery(coin)),
+    paidRoute(`/signal/${coin}`, PRICE_SIGNAL, signalDesc(coin), signalDiscovery(coin)),
+    paidRoute(`/api/v1/signal/${coin}`, PRICE_SIGNAL, signalDesc(coin), signalDiscovery(coin)),
   );
 }
 
 app.use(paymentMiddleware(paidRoutes, resourceServer));
 
+app.get("/api/scan", proxy);
 app.get("/api/data", proxy);
 app.get("/api/signal", proxy);
 app.get("/trade-signal", proxy);
@@ -240,5 +278,7 @@ app.get("/signal/:coin", proxy);
 app.get("/api/v1/signal/:coin", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`x402 gateway v14.0 on :${PORT} price=${PRICE_LABEL}`);
+  console.log(
+    `x402 gateway v15.0 on :${PORT} signal=${label(PRICE_SIGNAL)} scan=${label(PRICE_SCAN)}`,
+  );
 });

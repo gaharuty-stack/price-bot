@@ -13,8 +13,12 @@ from config import (
     COINS,
     MAX_COMPARE_COINS,
     PAYMENT,
+    PAYMENT_TIERS,
     PREVIEW_RATE_LIMIT_PER_MINUTE,
+    PRICE_SCAN,
+    PRICE_SIGNAL,
     RATE_LIMIT_PER_MINUTE,
+    SCAN_COINS,
     SERVICE_URL,
     SIGNAL_INDEX_COINS,
     VERSION,
@@ -52,7 +56,14 @@ def _log_traffic(response):
         q = request.args.get("q") or request.args.get("coins") or path
         # Paid handlers log themselves on 200.
         if response.status_code == 200 and (
-            path in ("/api/data", "/api/compare", "/api/trending", "/api/signal", "/trade-signal")
+            path in (
+                "/api/data",
+                "/api/compare",
+                "/api/trending",
+                "/api/signal",
+                "/api/scan",
+                "/trade-signal",
+            )
             or path.startswith("/signal/")
             or path.startswith("/api/v1/signal/")
         ):
@@ -126,6 +137,10 @@ def build_coin_response(query: str) -> dict:
         "confidence": signal_data["confidence"],
         "target_price": signal_data["target_price"],
         "stop_loss": signal_data["stop_loss"],
+        "confluence": signal_data.get("confluence", 0),
+        "tradeable_now": signal_data.get("tradeable_now", False),
+        "momentum_5d": signal_data.get("momentum_5d"),
+        "setup_votes": signal_data.get("setup_votes") or [],
         "ohlc": market.get("ohlc") or [],
         "indicators": {
             "rsi": signal_data["rsi"],
@@ -172,9 +187,13 @@ def health():
         "coins_supported": len(set(COINS.values())),
         "total_requests": stats.get("total_requests", 0),
         "paid_requests": stats.get("paid_requests", 0),
+        "paid_24h": stats.get("paid_24h", 0),
+        "conversion_pct": stats.get("conversion_pct", 0),
+        "pricing": PAYMENT_TIERS,
         "avg_response_ms": avg_ms,
         "last_price_update": get_last_snapshot_at(),
         "data_source": "coingecko",
+        "hero_endpoint": "/api/scan",
     })
 
 
@@ -214,7 +233,7 @@ def preview_data():
             return jsonify({"error": "upstream_unavailable", "message": str(exc)}), 503
 
         response_cache[cache_key] = build_preview_brief(
-            result, query, SERVICE_URL, PAYMENT["amount"]
+            result, query, SERVICE_URL, PRICE_SIGNAL, PRICE_SCAN
         )
 
     _track_response(started)
@@ -264,16 +283,17 @@ def _paid_signal_response(query: str, *, flat: bool = False, endpoint: str = "si
     if load_err:
         return load_err
 
+    payment = {**PAYMENT, "amount": PAYMENT_TIERS["signal"]}
     if flat and agent_format:
         # Flat brief matches how agents consume /signal/BTC style APIs.
         payload = {
             **cached["data"],
             "status": "ok",
-            "payment": PAYMENT,
+            "payment": payment,
             "paid_request": paid,
         }
     else:
-        payload = {**cached, "payment": PAYMENT, "paid_request": paid}
+        payload = {**cached, "payment": payment, "paid_request": paid}
 
     log_request(query, ip, 200, request_id, paid)
     _track_response(started)
@@ -364,11 +384,13 @@ def compare_coins():
         "count": len(results),
         "bundle": {
             "coins": len(results),
-            "price_usdc": PAYMENT["amount"],
-            "note": f"{len(results)} coin briefs in one ${PAYMENT['amount']} call",
+            "price_usdc": PAYMENT_TIERS["compare"],
+            "note": f"{len(results)} coin briefs in one ${PAYMENT_TIERS['compare']} call",
         },
+        "tradeable_count": rel.get("tradeable_count"),
     }
 
+    payment = {**PAYMENT, "amount": PAYMENT_TIERS["compare"]}
     payload = {
         "status": "ok",
         "coins": results,
@@ -376,7 +398,7 @@ def compare_coins():
         "summary": summary,
         "errors": errors,
         "format": "agent" if agent_format else "full",
-        "payment": PAYMENT,
+        "payment": payment,
         "paid_request": paid,
     }
     log_request(f"compare:{raw}", ip, 200, request_id, paid)
@@ -398,15 +420,115 @@ def trending():
         log_request("trending", ip, 503, request_id, paid)
         return jsonify({"error": "upstream_unavailable", "message": "market snapshot empty"}), 503
 
+    payment = {**PAYMENT, "amount": PAYMENT_TIERS["trending"]}
     payload = {
         "status": "ok",
         "gainers": data["gainers"],
         "losers": data["losers"],
         "summary": f"Top gainer: {data['gainers'][0]['ticker'] if data['gainers'] else 'n/a'}",
-        "payment": PAYMENT,
+        "payment": payment,
         "paid_request": paid,
     }
     log_request("trending", ip, 200, request_id, paid)
+    _track_response(started)
+    return jsonify(signed_payload(payload))
+
+
+def _scan_market(limit: int = 5) -> dict:
+    """Rank liquid coins by tradeable setups — the product agents pay for."""
+    cache_key = f"scan:{limit}"
+    if cache_key in response_cache:
+        return response_cache[cache_key]
+
+    briefs = []
+    for coin_id in SCAN_COINS:
+        try:
+            row = build_coin_response(coin_id)
+            briefs.append(build_agent_brief(row))
+        except Exception:
+            logger.exception("scan skip %s", coin_id)
+
+    buys = sorted(
+        [b for b in briefs if b.get("signal") == "BUY"],
+        key=lambda b: (b.get("tradeable_now"), b.get("confluence", 0), b.get("edge_score", 0)),
+        reverse=True,
+    )[:limit]
+    sells = sorted(
+        [b for b in briefs if b.get("signal") == "SELL"],
+        key=lambda b: (b.get("tradeable_now"), b.get("confluence", 0), b.get("edge_score", 0)),
+        reverse=True,
+    )[:limit]
+    tradeable = [b for b in briefs if b.get("tradeable_now")]
+    result = {
+        "scanned": len(briefs),
+        "tradeable_count": len(tradeable),
+        "top_buys": buys,
+        "top_sells": sells,
+        "best_setup": (buys + sells + briefs)[0] if (buys or sells or briefs) else None,
+    }
+    response_cache[cache_key] = result
+    return result
+
+
+@app.route("/api/pulse", methods=["GET"])
+def market_pulse():
+    """Free FOMO tease: how many setups exist — not which or BUY/SELL."""
+    started = time.perf_counter()
+    ip = _client_ip()
+    if not check_rate_limit(f"pulse:{ip}", PREVIEW_RATE_LIMIT_PER_MINUTE):
+        return jsonify({"error": "rate_limit_exceeded", "retry_after_seconds": 60}), 429
+
+    scan = _scan_market(limit=5)
+    payload = {
+        "status": "pulse",
+        "scanned": scan["scanned"],
+        "tradeable_setups": scan["tradeable_count"],
+        "has_buy_candidates": bool(scan["top_buys"]),
+        "has_sell_candidates": bool(scan["top_sells"]),
+        "locked": ["top_buys", "top_sells", "signals", "levels", "targets"],
+        "upgrade": {
+            "endpoint": f"{SERVICE_URL}/api/scan",
+            "price": f"{PRICE_SCAN} USDC",
+            "pay": "x402 USDC on Base",
+            "why": "Unlock ranked BUY/SELL setups with confluence, S/R, ATR targets",
+        },
+    }
+    _track_response(started)
+    return jsonify(payload)
+
+
+@app.route("/api/scan", methods=["GET"])
+def scan_setups():
+    """Hero paid product: market-wide tradeable BUY/SELL setups in one call."""
+    started = time.perf_counter()
+    guard, err = _paid_guard("scan")
+    if err:
+        return err
+    request_id, ip, paid = guard
+
+    limit = min(request.args.get("limit", 5, type=int), 10)
+    scan = _scan_market(limit=limit)
+    if scan["scanned"] < 3:
+        log_request("scan", ip, 503, request_id, paid)
+        return jsonify({"error": "upstream_unavailable", "message": "scan universe cold"}), 503
+
+    payment = {**PAYMENT, "amount": PAYMENT_TIERS["scan"]}
+    payload = {
+        "status": "ok",
+        "scanned": scan["scanned"],
+        "tradeable_count": scan["tradeable_count"],
+        "top_buys": scan["top_buys"],
+        "top_sells": scan["top_sells"],
+        "best_setup": scan["best_setup"],
+        "summary": (
+            f"{scan['tradeable_count']} tradeable setups / {scan['scanned']} scanned. "
+            f"Best: {(scan['best_setup'] or {}).get('coin', 'n/a')} "
+            f"{(scan['best_setup'] or {}).get('signal', '')}."
+        ),
+        "payment": payment,
+        "paid_request": paid,
+    }
+    log_request("scan", ip, 200, request_id, paid)
     _track_response(started)
     return jsonify(signed_payload(payload))
 
@@ -435,18 +557,19 @@ def _payment_info():
 
 def _agent_guidance_text() -> str:
     return (
-        f"Crypto Agent Brief API — cheapest actionable x402 signal pack ({PAYMENT['amount']} USDC on Base).\n"
+        "Crypto Agent Brief API — actionable x402 setups for trading agents "
+        f"(signal {PAYMENT_TIERS['signal']} USDC, scan/compare {PAYMENT_TIERS['scan']} USDC on Base).\n"
         "Workflow:\n"
-        "1) Free tease: GET /api/preview?q=btc (spot+24h + edge_band teaser; signal locked).\n"
-        "2) Preferred paid call: GET /signal/BTC (also /signal/ETH, /signal/SOL) — flat BUY/SELL/HOLD "
-        "pack with support/resistance, regime, risk, edge_score, invalidation, target, stop.\n"
-        "3) Aliases: GET /api/signal?q=btc | GET /trade-signal?q=btc | GET /api/data?q=btc | "
-        "GET /api/v1/signal/BTC.\n"
-        f"4) Best value: GET /api/compare?coins=btc,eth,sol — up to 5 coins + vs-BTC strength "
-        f"in one {PAYMENT['amount']} USDC payment.\n"
-        "5) Momentum: GET /api/trending?limit=5.\n"
+        "1) Free pulse: GET /api/pulse — how many tradeable setups exist right now (directions locked).\n"
+        "2) Free tease: GET /api/preview?q=btc — spot+24h + setup_hint; signal locked.\n"
+        f"3) BEST VALUE (hero): GET /api/scan — ranked top BUY/SELL setups across liquid coins "
+        f"with confluence + tradeable_now + ATR targets ({PAYMENT_TIERS['scan']} USDC).\n"
+        f"4) Single coin: GET /signal/BTC (also /signal/ETH, /signal/SOL) — "
+        f"{PAYMENT_TIERS['signal']} USDC flat pack.\n"
+        f"5) Compare: GET /api/compare?coins=btc,eth,sol — vs-BTC strength ({PAYMENT_TIERS['compare']} USDC).\n"
+        "6) Momentum: GET /api/trending?limit=5.\n"
         "Pay HTTP 402 with x402 USDC on Base (PAYMENT-SIGNATURE / X-PAYMENT), then retry.\n"
-        "Do not use free preview as a substitute for the signal pack."
+        "Prefer /api/scan when you need what to trade next — not a single-coin coin-flip."
     )
 
 
@@ -454,21 +577,28 @@ def _paid_guidance(kind: str) -> str:
     if kind == "signal":
         return (
             "Use case: get a live Bitcoin/ETH/SOL BUY/SELL/HOLD trading signal for an AI agent. "
-            f"Pay {PAYMENT['amount']} USDC via x402 on Base, then GET /signal/BTC "
-            "(or /api/signal?q=btc). Returns flat JSON: signal, confidence, edge_score, "
-            "support/resistance levels, regime, risk, invalidation, target_price, stop_loss. "
-            "Free tease: GET /api/preview?q=btc."
+            f"Pay {PAYMENT_TIERS['signal']} USDC via x402 on Base, then GET /signal/BTC "
+            "(or /api/signal?q=btc). Returns flat JSON: signal, confidence, edge_score, confluence, "
+            "tradeable_now, support/resistance, regime, risk, invalidation, ATR target/stop. "
+            f"For market-wide setups prefer GET /api/scan ({PAYMENT_TIERS['scan']} USDC)."
         )
     if kind == "data":
         return (
-            "Legacy alias of /signal/{coin}. Prefer GET /signal/BTC. "
+            "Legacy alias of /signal/{coin}. Prefer GET /signal/BTC or hero GET /api/scan. "
             "Pay once with x402 USDC on Base, then GET /api/data?q=btc for wrapped agent pack."
         )
     if kind == "compare":
         return (
             "Use case: rank BTC vs ETH vs SOL in one call for an AI trading agent. "
-            f"Best value at {PAYMENT['amount']} USDC: GET /api/compare?coins=btc,eth,sol. "
-            "Returns per-coin agent packs + vs-BTC relative strength + best/worst 24h."
+            f"GET /api/compare?coins=btc,eth,sol for {PAYMENT_TIERS['compare']} USDC. "
+            "Returns per-coin agent packs + vs-BTC relative strength + tradeable_count."
+        )
+    if kind == "scan":
+        return (
+            "Use case: find what to trade NEXT across liquid majors in one payment. "
+            f"Hero endpoint GET /api/scan for {PAYMENT_TIERS['scan']} USDC — returns top BUY and "
+            "top SELL setups with confluence, tradeable_now, S/R, ATR targets. "
+            "Free FOMO tease first: GET /api/pulse."
         )
     return (
         "Use case: find which cryptocurrencies are pumping or dumping today. "
@@ -506,6 +636,8 @@ def _agent_brief_schema():
             "signal": {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
             "confidence": {"type": "number"},
             "edge_score": {"type": "integer"},
+            "confluence": {"type": "integer"},
+            "tradeable_now": {"type": "boolean"},
             "regime": {"type": "string", "enum": ["calm", "normal", "volatile"]},
             "risk": {"type": "string", "enum": ["low", "medium", "high"]},
             "levels": {
@@ -702,13 +834,13 @@ def _openapi_paths():
                 "operationId": "compareCoins",
                 "summary": (
                     "Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — "
-                    f"BUY/SELL/HOLD + vs-BTC strength in one {PAYMENT['amount']} USDC payment"
+                    f"BUY/SELL/HOLD + vs-BTC strength in one {PAYMENT_TIERS['compare']} USDC payment"
                 ),
                 "description": (
-                    "Best-value paid call for portfolio ranking agents. Compare 2–5 "
-                    "cryptocurrencies (example: coins=btc,eth,sol) in a single x402 payment. "
-                    "Returns per-coin price + BUY/SELL/HOLD agent packs, best/worst 24h "
-                    "performers, and vs-BTC relative strength."
+                    "Portfolio ranking for agents. Compare 2–5 cryptocurrencies "
+                    "(example: coins=btc,eth,sol) in a single x402 payment. "
+                    "Returns per-coin agent packs, best/worst 24h, vs-BTC strength, tradeable_count. "
+                    f"For market-wide setups prefer GET /api/scan ({PAYMENT_TIERS['scan']} USDC)."
                 ),
                 "tags": ["Trading", "Crypto", "Compare"],
                 "security": paid_security,
@@ -752,9 +884,16 @@ def _openapi_paths():
                     },
                     **_paid_402(),
                 },
-                "x-payment-info": _payment_info(),
+                "x-payment-info": {
+                    "price": {
+                        "mode": "fixed",
+                        "currency": "USD",
+                        "amount": f"{float(PAYMENT_TIERS['compare']):.6f}",
+                    },
+                    "protocols": [{"x402": {}}],
+                },
                 "x-guidance": _paid_guidance("compare"),
-                "x402": legacy_x402,
+                "x402": {"price": PAYMENT_TIERS["compare"], "network": PAYMENT["network"]},
             }
         },
         "/api/trending": {
@@ -762,11 +901,11 @@ def _openapi_paths():
                 "operationId": "getTrending",
                 "summary": (
                     "Top crypto gainers and losers last 24h — "
-                    f"momentum scan for AI trading agents ({PAYMENT['amount']} USDC x402)"
+                    f"momentum list for AI trading agents ({PAYMENT_TIERS['trending']} USDC x402)"
                 ),
                 "description": (
                     "Lists top gainers and losers among supported coins by 24h percent change. "
-                    "Use before picking a coin for /signal/BTC."
+                    "Use before picking a coin for /signal/BTC or unlock setups via /api/scan."
                 ),
                 "tags": ["Search", "Crypto", "Trending"],
                 "security": paid_security,
@@ -796,9 +935,87 @@ def _openapi_paths():
                     },
                     **_paid_402(),
                 },
-                "x-payment-info": _payment_info(),
+                "x-payment-info": {
+                    "price": {
+                        "mode": "fixed",
+                        "currency": "USD",
+                        "amount": f"{float(PAYMENT_TIERS['trending']):.6f}",
+                    },
+                    "protocols": [{"x402": {}}],
+                },
                 "x-guidance": _paid_guidance("trending"),
-                "x402": legacy_x402,
+                "x402": {"price": PAYMENT_TIERS["trending"], "network": PAYMENT["network"]},
+            }
+        },
+        "/api/pulse": {
+            "get": {
+                "operationId": "marketPulse",
+                "summary": "Free FOMO tease — count of tradeable setups (directions locked)",
+                "description": (
+                    "Free market pulse for AI agents: how many tradeable setups exist now. "
+                    f"Directions stay locked — unlock with GET /api/scan ({PAYMENT_TIERS['scan']} USDC)."
+                ),
+                "tags": ["Search", "Crypto"],
+                "security": free_security,
+                "responses": {"200": {"description": "Setup count tease with upgrade to /api/scan"}},
+            }
+        },
+        "/api/scan": {
+            "get": {
+                "operationId": "scanSetups",
+                "summary": (
+                    "Market-wide BUY/SELL setup scanner for AI agents — "
+                    f"top tradeable setups in one {PAYMENT_TIERS['scan']} USDC payment"
+                ),
+                "description": (
+                    "Hero paid endpoint. Scans liquid majors (BTC, ETH, SOL, …) and returns "
+                    "ranked top BUY and top SELL setups with confluence, tradeable_now, "
+                    "support/resistance, ATR-based target/stop, and invalidation. "
+                    f"Pay {PAYMENT_TIERS['scan']} USDC via x402 on Base. "
+                    "Free FOMO first: GET /api/pulse."
+                ),
+                "tags": ["Trading", "Crypto", "Signals", "Scan"],
+                "security": paid_security,
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {"type": "integer", "default": 5, "minimum": 1, "maximum": 10},
+                        "description": "How many top buys and top sells to return",
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Ranked tradeable BUY/SELL setups",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {"type": "string"},
+                                        "scanned": {"type": "integer"},
+                                        "tradeable_count": {"type": "integer"},
+                                        "top_buys": {"type": "array", "items": agent_brief_schema},
+                                        "top_sells": {"type": "array", "items": agent_brief_schema},
+                                        "best_setup": agent_brief_schema,
+                                        "summary": {"type": "string"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    **_paid_402(),
+                },
+                "x-payment-info": {
+                    "price": {
+                        "mode": "fixed",
+                        "currency": "USD",
+                        "amount": f"{float(PAYMENT_TIERS['scan']):.6f}",
+                    },
+                    "protocols": [{"x402": {}}],
+                },
+                "x-guidance": _paid_guidance("scan"),
+                "x402": {"price": PAYMENT_TIERS["scan"], "network": PAYMENT["network"]},
             }
         },
         "/api/coins": {
@@ -888,13 +1105,13 @@ def openapi_spec():
         "title": "Crypto Agent Brief API",
         "version": VERSION,
         "description": (
-            "Cheapest x402 Bitcoin/ETH/SOL trading signal API for AI agents. "
-            f"{PAYMENT['amount']} USDC on Base per call. "
-            "Preferred: GET /signal/BTC (also /signal/ETH, /signal/SOL) for flat BUY/SELL/HOLD "
-            "with support/resistance, edge_score, invalidation, target and stop — "
-            "not a raw CoinGecko dump. "
-            f"Best value: GET /api/compare?coins=btc,eth,sol (up to 5 coins) for one {PAYMENT['amount']} payment. "
-            "Free tease: GET /api/preview?q=btc. Guidance: /guidance or /llms.txt."
+            "Actionable x402 crypto setup API for AI trading agents — not raw CoinGecko dumps. "
+            f"Hero: GET /api/scan — ranked BUY/SELL setups with confluence + tradeable_now "
+            f"({PAYMENT_TIERS['scan']} USDC). "
+            f"Single coin: GET /signal/BTC ({PAYMENT_TIERS['signal']} USDC) with S/R, invalidation, "
+            "ATR target/stop. "
+            f"Compare: GET /api/compare?coins=btc,eth,sol ({PAYMENT_TIERS['compare']} USDC). "
+            "Free: GET /api/pulse (setup count) and GET /api/preview?q=btc. Guidance: /guidance."
         ),
         "x-guidance": _agent_guidance_text(),
         "x402": PAYMENT,
@@ -918,7 +1135,8 @@ def openapi_spec():
             {"name": "Crypto", "description": "Bitcoin, Ethereum, Solana and 40+ coins"},
             {"name": "Signals", "description": "Technical analysis agent packs"},
             {"name": "Compare", "description": "Multi-coin ranking + vs-BTC strength"},
-            {"name": "Search", "description": "Coin list, preview, trending movers"},
+            {"name": "Scan", "description": "Market-wide tradeable setup scanner"},
+            {"name": "Search", "description": "Coin list, preview, pulse, trending"},
             {"name": "Meta", "description": "Health, OpenAPI, guidance, llms.txt"},
         ],
         "components": _openapi_components(),
@@ -932,20 +1150,22 @@ def mcp_discovery():
         "name": "Crypto Agent Brief API",
         "version": VERSION,
         "description": (
-            f"Cheapest x402 crypto BUY/SELL/HOLD signals ({PAYMENT['amount']} USDC). "
-            "Prefer GET /signal/BTC. Free /api/preview is price-only."
+            f"x402 crypto setup scanner + signals (scan {PAYMENT_TIERS['scan']} / "
+            f"signal {PAYMENT_TIERS['signal']} USDC). Prefer GET /api/scan. Free /api/pulse."
         ),
         "guidance": f"{SERVICE_URL}/guidance",
         "x402": PAYMENT,
         "endpoints": [
+            {"path": "/api/pulse", "method": "GET", "price": "0", "example": f"{SERVICE_URL}/api/pulse"},
             {"path": "/api/preview", "method": "GET", "price": "0", "example": f"{SERVICE_URL}/api/preview?q=btc"},
-            {"path": "/signal/BTC", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/signal/BTC"},
-            {"path": "/signal/ETH", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/signal/ETH"},
-            {"path": "/signal/SOL", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/signal/SOL"},
-            {"path": "/api/signal", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/api/signal?q=btc"},
-            {"path": "/trade-signal", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/trade-signal?q=btc"},
-            {"path": "/api/compare", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/api/compare?coins=btc,eth,sol"},
-            {"path": "/api/trending", "method": "GET", "price": PAYMENT["amount"], "example": f"{SERVICE_URL}/api/trending"},
+            {"path": "/api/scan", "method": "GET", "price": PAYMENT_TIERS["scan"], "example": f"{SERVICE_URL}/api/scan"},
+            {"path": "/signal/BTC", "method": "GET", "price": PAYMENT_TIERS["signal"], "example": f"{SERVICE_URL}/signal/BTC"},
+            {"path": "/signal/ETH", "method": "GET", "price": PAYMENT_TIERS["signal"], "example": f"{SERVICE_URL}/signal/ETH"},
+            {"path": "/signal/SOL", "method": "GET", "price": PAYMENT_TIERS["signal"], "example": f"{SERVICE_URL}/signal/SOL"},
+            {"path": "/api/signal", "method": "GET", "price": PAYMENT_TIERS["signal"], "example": f"{SERVICE_URL}/api/signal?q=btc"},
+            {"path": "/trade-signal", "method": "GET", "price": PAYMENT_TIERS["signal"], "example": f"{SERVICE_URL}/trade-signal?q=btc"},
+            {"path": "/api/compare", "method": "GET", "price": PAYMENT_TIERS["compare"], "example": f"{SERVICE_URL}/api/compare?coins=btc,eth,sol"},
+            {"path": "/api/trending", "method": "GET", "price": PAYMENT_TIERS["trending"], "example": f"{SERVICE_URL}/api/trending"},
             {"path": "/api/coins", "method": "GET", "price": "0"},
             {"path": "/guidance", "method": "GET", "price": "0"},
         ],
@@ -957,35 +1177,36 @@ def mcp_discovery():
 def llms_txt():
     text = f"""# Crypto Agent Brief API v{VERSION}
 
-> Cheapest x402 Bitcoin trading signal for AI agents — {PAYMENT['amount']} USDC on Base.
-> One paid call: BUY/SELL/HOLD + support/resistance + regime + risk + invalidation.
+> Actionable x402 crypto setups for AI trading agents.
+> Hero call: GET /api/scan → ranked BUY/SELL setups ({PAYMENT_TIERS['scan']} USDC).
 
 ## Why pay here
-- Typical signal APIs charge $0.01–$0.25 — we charge {PAYMENT['amount']} USDC
-- Compact **agent pack** agents can act on (not a CoinGecko dump)
-- Compare up to 5 coins in **one** payment (best value)
-- Free preview proves the feed works; signal stays locked until pay
+- Market-wide **setup scanner** (not one coin dump)
+- confluence + tradeable_now so agents skip weak flips
+- ATR-based target/stop + support/resistance + invalidation
+- Free /api/pulse proves setups exist without revealing direction
 
-## Preferred endpoints (paid)
-- Bitcoin signal → GET /signal/BTC
-- Ethereum signal → GET /signal/ETH
-- Solana signal → GET /signal/SOL
-- Any coin → GET /api/signal?q=btc  or  GET /trade-signal?q=eth
-- Multi-coin + vs-BTC → GET /api/compare?coins=btc,eth,sol
-- Gainers/losers → GET /api/trending
+## Preferred endpoints
+- HERO scan → GET /api/scan ({PAYMENT_TIERS['scan']} USDC)
+- Bitcoin signal → GET /signal/BTC ({PAYMENT_TIERS['signal']} USDC)
+- Ethereum / Solana → GET /signal/ETH | /signal/SOL
+- Compare + vs-BTC → GET /api/compare?coins=btc,eth,sol ({PAYMENT_TIERS['compare']} USDC)
+- Gainers/losers → GET /api/trending ({PAYMENT_TIERS['trending']} USDC)
 
 ## Free
-- Tease → GET /api/preview?q=btc
+- Pulse (setup count) → GET /api/pulse
+- Price tease → GET /api/preview?q=btc
 - Guidance → GET /guidance
 - Docs → GET /llms.txt
 
 ## Agent pack fields
-coin, price_usd, signal, confidence, edge_score, regime, risk,
-levels.support, levels.resistance, reason, action_hint, invalidation,
-target_price, stop_loss
+coin, price_usd, signal, confidence, edge_score, confluence, tradeable_now,
+regime, risk, levels.support, levels.resistance, reason, action_hint,
+invalidation, target_price, stop_loss
 
-## Pricing
-- Paid: {PAYMENT['amount']} USDC on Base (x402) per signal/compare/trending call
+## Pricing (Base USDC / x402)
+- Signal / trending: {PAYMENT_TIERS['signal']} USDC
+- Scan / compare: {PAYMENT_TIERS['scan']} USDC
 - Pay HTTP 402 with PAYMENT-SIGNATURE or X-PAYMENT, then retry
 
 ## Base URL
@@ -1005,6 +1226,7 @@ def robots_txt():
             "Allow: /openapi.json\n"
             "Allow: /.well-known/\n"
             "Allow: /api/preview\n"
+            "Allow: /api/pulse\n"
             "Allow: /api/coins\n"
             f"\nSitemap: {SERVICE_URL}/openapi.json\n"
         ),
@@ -1019,13 +1241,23 @@ def root():
         "service": "Crypto Agent Brief API",
         "version": VERSION,
         "status": "ok",
-        "tagline": f"Cheapest x402 BUY/SELL/HOLD signals — {PAYMENT['amount']} USDC",
+        "tagline": f"x402 setup scanner — /api/scan {PAYMENT_TIERS['scan']} USDC",
         "coins_supported": len(set(COINS.values())),
         "payment": PAYMENT,
+        "pricing": PAYMENT_TIERS,
         "guidance": "/guidance",
         "endpoints": {
-            "free": ["/health", "/api/coins", "/api/preview", "/guidance", "/llms.txt", "/.well-known/x402"],
+            "free": [
+                "/health",
+                "/api/coins",
+                "/api/preview",
+                "/api/pulse",
+                "/guidance",
+                "/llms.txt",
+                "/.well-known/x402",
+            ],
             "paid": [
+                "/api/scan",
                 "/signal/BTC",
                 "/signal/ETH",
                 "/signal/SOL",
@@ -1037,6 +1269,8 @@ def root():
             ],
         },
         "examples": {
+            "pulse": "/api/pulse",
+            "scan": "/api/scan",
             "preview": "/api/preview?q=btc",
             "btc_signal": "/signal/BTC",
             "eth_signal": "/signal/ETH",

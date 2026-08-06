@@ -1,18 +1,21 @@
 # ai.txt — machine-readable service description for AI agents
 
 service: Crypto Agent Brief API
-version: 14.0.0
+version: 15.0.0
 payment: x402 USDC on Base
-price: $0.001 per paid request
+price_signal: $0.01 per single-coin signal
+price_scan: $0.05 per market setup scan
+price_compare: $0.05 per multi-coin compare
 discovery: /.well-known/x402, /.well-known/mcp.json, /openapi.json, /llms.txt, /guidance
-free_endpoints: /, /health, /api/coins, /api/preview, /guidance, /llms.txt
-paid_endpoints: GET /signal/BTC, GET /signal/ETH, GET /signal/SOL, GET /api/signal, GET /trade-signal, GET /api/data, GET /api/compare, GET /api/trending
-try_first: GET /api/preview?q=btc
-preferred_paid: GET /signal/BTC
-example_paid: GET /signal/BTC
-best_value: GET /api/compare?coins=btc,eth,sol
+free_endpoints: /, /health, /api/coins, /api/preview, /api/pulse, /guidance, /llms.txt
+paid_endpoints: GET /api/scan, GET /signal/BTC, GET /signal/ETH, GET /signal/SOL, GET /api/signal, GET /trade-signal, GET /api/data, GET /api/compare, GET /api/trending
+try_first: GET /api/pulse
+preferred_paid: GET /api/scan
+example_paid: GET /api/scan
+best_value: GET /api/scan
+single_coin: GET /signal/BTC
 data_source: coingecko
-indicators: RSI, MACD, Bollinger Bands, ATR, Stochastic
-outputs: BUY/SELL/HOLD, edge_score, support/resistance, regime, risk, invalidation
+indicators: RSI, MACD, Bollinger Bands, ATR, Stochastic, 5d momentum
+outputs: BUY/SELL/HOLD, confluence, tradeable_now, edge_score, support/resistance, regime, risk, invalidation, ATR target/stop
 contact: https://github.com/gaharuty-stack/price-bot
 email: gaharuty@gmail.com
