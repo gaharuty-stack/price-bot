@@ -7,7 +7,9 @@ Allow: /openapi.json
 Allow: /llms.txt
 Allow: /ai.txt
 
-# Paid agent API — $0.01 USDC via x402 on Base
+# Paid agent API — $0.001 USDC via x402 on Base
+Allow: /guidance
+Allow: /signal/
 # GET /api/data?q=btc
 # GET /api/compare?coins=btc,eth,sol
 # GET /api/trending

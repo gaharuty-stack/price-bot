@@ -6,7 +6,7 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 
 const PAY_TO = process.env.PAY_TO || "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915";
-const PRICE = process.env.PRICE_USDC || "0.01";
+const PRICE = process.env.PRICE_USDC || "0.001";
 const PRICE_LABEL = PRICE.startsWith("$") ? PRICE : `$${PRICE}`;
 const FLASK_TARGET = process.env.FLASK_TARGET || "http://127.0.0.1:5000";
 const PORT = Number(process.env.PORT || 8080);
@@ -62,7 +62,6 @@ app.use((req, res, next) => {
 const proxy = createProxyMiddleware({
   target: FLASK_TARGET,
   changeOrigin: true,
-  // Fail fast instead of hanging agents for 30–120s (was causing Railway red latency).
   proxyTimeout: 20000,
   timeout: 20000,
 });
@@ -70,6 +69,7 @@ const proxy = createProxyMiddleware({
 const freeRoutes = [
   "/",
   "/health",
+  "/guidance",
   "/api/coins",
   "/api/preview",
   "/openapi.json",
@@ -96,42 +96,94 @@ const paidRoute = (path, description, discovery) => ({
   },
 });
 
-app.use(paymentMiddleware({
-  ...paidRoute(
-    "/api/data",
-    "Live crypto BUY/SELL/HOLD trading signal with support/resistance, regime, risk, edge_score and invalidation for Bitcoin/ETH/SOL — LLM-ready agent pack via x402",
-    {
-      input: { q: "btc", format: "agent" },
-      inputSchema: {
+const signalDiscovery = (exampleCoin) => ({
+  input: exampleCoin ? undefined : { q: "btc" },
+  inputSchema: exampleCoin
+    ? {
+        properties: {},
+      }
+    : {
         properties: {
           q: {
             type: "string",
             description: "Coin ticker for trading signal: btc, eth, sol, bitcoin, ethereum, …",
           },
+        },
+        required: ["q"],
+      },
+  output: {
+    example: {
+      coin: exampleCoin || "BTC",
+      price_usd: 95000,
+      signal: "HOLD",
+      confidence: 62,
+      edge_score: 64,
+      regime: "calm",
+      risk: "low",
+      levels: { support: 92000, resistance: 98000 },
+      reason: "neutral RSI; MACD flat",
+      action_hint: "No strong edge.",
+      invalidation: "break of support–resistance range",
+      target_price: 98000,
+      stop_loss: 92000,
+    },
+  },
+});
+
+const signalDesc = (coin) =>
+  coin
+    ? `Returns a trading signal for ${coin} (BUY/SELL/HOLD) with support/resistance, edge_score, invalidation, target and stop — ${PRICE_LABEL} USDC x402 on Base`
+    : `Live crypto BUY/SELL/HOLD trading signal with support/resistance, regime, risk, edge_score and invalidation — ${PRICE_LABEL} USDC x402 agent pack`;
+
+// Concrete /signal/BTC paths index better in AgentCash than generic /api/data.
+const indexCoins = ["BTC", "ETH", "SOL", "XRP", "DOGE"];
+const paidRoutes = {
+  ...paidRoute(
+    "/api/data",
+    `Legacy wrapped agent pack (prefer /signal/BTC) — ${PRICE_LABEL} USDC x402`,
+    {
+      input: { q: "btc", format: "agent" },
+      inputSchema: {
+        properties: {
+          q: { type: "string", description: "Coin ticker: btc, eth, sol, …" },
           format: { type: "string", enum: ["agent", "full"] },
         },
         required: ["q"],
       },
-      output: {
-        example: {
-          coin: "BTC",
-          price_usd: 95000,
-          signal: "HOLD",
-          confidence: 62,
-          edge_score: 64,
-          regime: "calm",
-          risk: "low",
-          levels: { support: 92000, resistance: 98000 },
-          reason: "neutral RSI; MACD flat",
-          action_hint: "No strong edge.",
-          invalidation: "break of support–resistance range",
+      output: { example: { status: "ok", data: signalDiscovery("BTC").output.example } },
+    },
+  ),
+  ...paidRoute("/api/signal", signalDesc(), signalDiscovery()),
+  ...paidRoute("/trade-signal", signalDesc(), signalDiscovery()),
+  ...paidRoute(
+    "/signal/:coin",
+    signalDesc(),
+    {
+      inputSchema: {
+        properties: {
+          coin: { type: "string", description: "Ticker: BTC, ETH, SOL, …" },
         },
+        required: ["coin"],
       },
+      output: signalDiscovery("BTC").output,
+    },
+  ),
+  ...paidRoute(
+    "/api/v1/signal/:coin",
+    signalDesc(),
+    {
+      inputSchema: {
+        properties: {
+          coin: { type: "string", description: "Ticker: BTC, ETH, SOL, …" },
+        },
+        required: ["coin"],
+      },
+      output: signalDiscovery("BTC").output,
     },
   ),
   ...paidRoute(
     "/api/compare",
-    "Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — BUY/SELL/HOLD briefs + vs-BTC relative strength in one x402 payment",
+    `Compare Bitcoin vs Ethereum vs Solana (2–5 coins) — BUY/SELL/HOLD + vs-BTC strength in one ${PRICE_LABEL} x402 payment`,
     {
       input: { coins: "btc,eth,sol", format: "agent" },
       inputSchema: {
@@ -155,7 +207,7 @@ app.use(paymentMiddleware({
   ),
   ...paidRoute(
     "/api/trending",
-    "Top crypto gainers and losers last 24h — momentum scan for AI trading agents via x402",
+    `Top crypto gainers and losers last 24h — momentum scan for AI trading agents via x402 (${PRICE_LABEL})`,
     {
       input: { limit: "5" },
       inputSchema: {
@@ -166,12 +218,26 @@ app.use(paymentMiddleware({
       output: { example: { gainers: [], losers: [] } },
     },
   ),
-}, resourceServer));
+};
+
+for (const coin of indexCoins) {
+  Object.assign(
+    paidRoutes,
+    paidRoute(`/signal/${coin}`, signalDesc(coin), signalDiscovery(coin)),
+    paidRoute(`/api/v1/signal/${coin}`, signalDesc(coin), signalDiscovery(coin)),
+  );
+}
+
+app.use(paymentMiddleware(paidRoutes, resourceServer));
 
 app.get("/api/data", proxy);
+app.get("/api/signal", proxy);
+app.get("/trade-signal", proxy);
 app.get("/api/compare", proxy);
 app.get("/api/trending", proxy);
+app.get("/signal/:coin", proxy);
+app.get("/api/v1/signal/:coin", proxy);
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`x402 gateway v13.4 on :${PORT} price=${PRICE_LABEL}`);
+  console.log(`x402 gateway v14.0 on :${PORT} price=${PRICE_LABEL}`);
 });

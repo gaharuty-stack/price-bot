@@ -183,22 +183,39 @@ def enrich_compare_with_relative(briefs: list[dict], btc_change: float | None) -
 
 
 def build_preview_brief(data: dict, query: str, service_url: str, price: str) -> dict:
-    """Free tease: spot + 24h only. Signal/TA stay behind x402."""
+    """Free tease: spot + 24h only. Signal/TA stay behind x402.
+
+    Teaser fields create urgency without giving away BUY/SELL.
+    """
     brief = build_agent_brief(data)
+    edge = int(brief.get("edge_score") or 0)
+    if edge >= 70:
+        edge_band = "strong"
+    elif edge >= 55:
+        edge_band = "moderate"
+    else:
+        edge_band = "weak"
+    coin = brief["coin"]
     return {
         "status": "preview",
         "query": query,
         "data": {
-            "coin": brief["coin"],
+            "coin": coin,
             "price_usd": brief["price_usd"],
             "change_24h": brief["change_24h"],
+        },
+        # Hint that a ready signal exists — without revealing direction.
+        "teaser": {
+            "signal_ready": True,
+            "edge_band": edge_band,
+            "risk": brief.get("risk"),
+            "regime": brief.get("regime"),
+            "unlock": f"GET {service_url}/signal/{coin} — BUY/SELL/HOLD + S/R + invalidation",
         },
         "locked": [
             "signal",
             "confidence",
             "edge_score",
-            "regime",
-            "risk",
             "reason",
             "levels",
             "invalidation",
@@ -207,20 +224,23 @@ def build_preview_brief(data: dict, query: str, service_url: str, price: str) ->
             "stop_loss",
         ],
         "upgrade": {
-            "endpoint": f"{service_url}/api/data?q={query}",
+            "endpoint": f"{service_url}/signal/{coin}",
+            "alt_endpoints": [
+                f"{service_url}/api/data?q={query}",
+                f"{service_url}/trade-signal?q={query}",
+            ],
             "price": f"{price} USDC",
             "pay": "x402 USDC on Base",
             "includes": [
                 "BUY/SELL/HOLD signal",
                 "confidence + edge_score",
-                "regime + risk",
                 "support/resistance levels",
                 "invalidation + target/stop",
                 "action_hint",
             ],
             "why_unique": (
-                "One cheap call returns an actionable agent pack: signal + S/R + "
-                "regime/risk + invalidation — not a raw CoinGecko dump."
+                f"Cheapest actionable agent pack at {price} USDC: signal + S/R + "
+                "invalidation — not a raw CoinGecko dump."
             ),
             "compare_deal": (
                 f"{service_url}/api/compare?coins=btc,eth,sol — up to 5 coins "

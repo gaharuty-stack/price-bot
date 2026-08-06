@@ -5,7 +5,8 @@ PAY_TO = os.environ.get("PAY_TO", "0x3f10530c86e6a1d26edbf27b6b6e660c77d79915")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 PAYMENT = {
-    "amount": os.environ.get("PRICE_USDC", "0.01"),
+    # $0.001 undercuts the crowded $0.01 signal market and raises pay-through rates.
+    "amount": os.environ.get("PRICE_USDC", "0.001"),
     "currency": "USDC",
     "network": os.environ.get("PAYMENT_NETWORK", "base"),
     "receiver": PAY_TO,
@@ -72,5 +73,7 @@ SERVICE_URL = os.environ.get(
     "https://price-bot-production-4d6a.up.railway.app",
 )
 
-VERSION = "13.4.1"
+VERSION = "14.0.0"
 MAX_COMPARE_COINS = 5
+# Coins with dedicated OpenAPI paths so AgentCash search matches "/signal/BTC" queries.
+SIGNAL_INDEX_COINS = ("BTC", "ETH", "SOL", "XRP", "DOGE")
